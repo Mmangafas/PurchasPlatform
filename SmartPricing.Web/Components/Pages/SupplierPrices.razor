@@ -1,0 +1,152 @@
+@page "/supplier-prices"
+@attribute [Authorize(Policy = "RequireRequester")]
+@inject ISupplierPriceService PriceSvc
+@inject IMasterDataService MasterSvc
+@inject ISnackbar Snackbar
+@inject IDialogService Dialog
+@inject AppStateService AppState
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<PageTitle>Τιμές Προμηθευτών — Smart Pricing</PageTitle>
+
+<div class="sp-page-header">
+    <MudStack Row AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+        <div>
+            <MudText Typo="Typo.h4" Class="fw-700">Τιμές Προμηθευτών</MudText>
+            <div class="text-muted">Supplier Purchase Prices</div>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenAddDialog">
+            Νέα Τιμή / New Price
+        </MudButton>
+    </MudStack>
+</div>
+
+<!-- Filters -->
+<div class="sp-card mb-4">
+    <div class="sp-card-body" style="padding:16px 24px">
+        <MudGrid Spacing="2">
+            <MudItem xs="12" md="4">
+                <MudTextField Value="_search" Placeholder="Αναζήτηση είδους / Search item..."
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              ValueChanged="@((string v) => { _search = v; StateHasChanged(); })" />
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudSelect @bind-Value="_supplierFilter" Placeholder="Όλοι οι Προμηθευτές" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Clearable>
+                    @foreach (var s in _suppliers)
+                    {
+                        <MudSelectItem Value="@s.SupplierID">@s.SupplierName</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="2">
+                <MudCheckBox @bind-Value="_activeOnly" Label="Ενεργές μόνο / Active only" />
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudButton Variant="Variant.Outlined" OnClick="LoadData" StartIcon="@Icons.Material.Filled.Refresh">
+                    Ανανέωση / Refresh
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </div>
+</div>
+
+<!-- Table -->
+<div class="sp-card">
+    <MudTable Items="FilteredPrices" Hover Dense Elevation="0" Loading="_loading"
+              LoadingProgressColor="Color.Primary">
+        <HeaderContent>
+            <MudTh><MudTableSortLabel SortBy="new Func<SupplierPriceDto, object>(x => x.ERPItemCode)">Κωδικός</MudTableSortLabel></MudTh>
+            <MudTh>Είδος / Item</MudTh>
+            <MudTh>Κατηγορία</MudTh>
+            <MudTh>Προμηθευτής</MudTh>
+            <MudTh Style="text-align:right">Βασική Τιμή</MudTh>
+            <MudTh Style="text-align:right">Επιβαρύνσεις</MudTh>
+            <MudTh Style="text-align:right">Σύνολο Κόστος</MudTh>
+            <MudTh>Νόμισμα</MudTh>
+            <MudTh>Ισχύς Από</MudTh>
+            <MudTh>Ισχύς Έως</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd Class="text-mono">@context.ERPItemCode</MudTd>
+            <MudTd>
+                <div style="font-weight:600">@context.ItemName</div>
+                <div class="text-muted" style="font-size:.75rem">@context.UoM</div>
+            </MudTd>
+            <MudTd>@(context.CategoryName ?? "—")</MudTd>
+            <MudTd>@context.SupplierName</MudTd>
+            <MudTd Style="text-align:right" Class="price-value">@context.BasePrice.ToString("N4")</MudTd>
+            <MudTd Style="text-align:right" Class="price-value">@context.ExtraCharges.ToString("N4")</MudTd>
+            <MudTd Style="text-align:right">
+                <strong class="price-value">@context.TotalCost.ToString("N4")</strong>
+            </MudTd>
+            <MudTd>@(context.Currency ?? "EUR")</MudTd>
+            <MudTd Class="text-mono">@context.ValidFrom.ToString("dd/MM/yyyy")</MudTd>
+            <MudTd Class="text-mono">@(context.ValidTo?.ToString("dd/MM/yyyy") ?? "—")</MudTd>
+            <MudTd>
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                               OnClick="@(() => DeletePrice(context.SupplierPriceID))" />
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-6 text-muted" Style="text-align:center">
+                Δεν βρέθηκαν τιμές / No prices found
+            </MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>
+
+@code {
+    private List<SupplierPriceDto> _prices = [];
+    private List<Domain.Entities.Supplier> _suppliers = [];
+    private string _search = "";
+    private int? _supplierFilter;
+    private bool _activeOnly = true;
+    private bool _loading = true;
+
+    private IEnumerable<SupplierPriceDto> FilteredPrices => _prices
+        .Where(p => (string.IsNullOrWhiteSpace(_search) ||
+                     p.ItemName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                     p.ERPItemCode.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                     p.SupplierName.Contains(_search, StringComparison.OrdinalIgnoreCase)) &&
+                    (_supplierFilter is null || p.SupplierID == _supplierFilter));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _suppliers = await MasterSvc.GetSuppliersAsync();
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        _prices = await PriceSvc.GetAllAsync(_activeOnly);
+        _loading = false;
+    }
+
+    private async Task OpenAddDialog()
+    {
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await Dialog.ShowAsync<AddSupplierPriceDialog>("Νέα Τιμή Προμηθευτή", options);
+        var result = await dialog.Result;
+        if (!result!.Canceled) await LoadData();
+    }
+
+    private async Task DeletePrice(int id)
+    {
+        var ok = await Dialog.ShowMessageBox("Διαγραφή / Delete", "Θέλετε να διαγράψετε αυτή την τιμή;",
+            "Ναι / Yes", "Όχι / No");
+        if (ok == true)
+        {
+            await PriceSvc.DeleteAsync(id);
+            Snackbar.Add("Διαγράφηκε / Deleted", Severity.Success);
+            await LoadData();
+        }
+    }
+}

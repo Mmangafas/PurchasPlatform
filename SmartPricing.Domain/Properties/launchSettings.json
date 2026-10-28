@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "SmartPricing.Domain": {
+      "commandName": "Project",
+      "sqlDebugging": true
+    }
+  }
+}

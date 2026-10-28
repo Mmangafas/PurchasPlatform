@@ -1,0 +1,224 @@
+@page "/admin/settings"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "RequireAdmin")]
+@inject DatabaseSettingsService DbSettings
+@inject ISnackbar Snackbar
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<PageTitle>Settings — SmartPricing</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-1" Style="font-weight:700">
+    ⚙️ System Settings
+</MudText>
+<MudText Typo="Typo.body2" Class="text-muted mb-6">
+    Configure database connection and application settings. Changes are saved to appsettings.json and take effect on next restart.
+</MudText>
+
+<!-- Database Connection Card -->
+<div class="sp-card mb-4">
+    <div class="sp-card-header">
+        <MudIcon Icon="@Icons.Material.Filled.Storage" Class="mr-2" Style="color:var(--sp-accent)" />
+        Database Connection
+    </div>
+    <div class="sp-card-body" style="padding:24px">
+
+        <MudGrid Spacing="3">
+
+            <!-- Server -->
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_s.Server"
+                              Label="SQL Server / Instance"
+                              Placeholder="e.g. MYSERVER\SQLEXPRESS or 192.168.1.10"
+                              Variant="Variant.Outlined"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Dns"
+                              HelperText="Server name, IP, or named instance" />
+            </MudItem>
+
+            <!-- Database -->
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_s.Database"
+                              Label="Database Name"
+                              Placeholder="e.g. SmartPricingDb"
+                              Variant="Variant.Outlined"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.DataArray" />
+            </MudItem>
+
+            <!-- Auth type toggle -->
+            <MudItem xs="12">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Authentication</MudText>
+                <MudToggleGroup T="string" Value="@(_s.UseWindowsAuth ? "windows" : "sql")"
+                                ValueChanged="OnAuthTypeChanged"
+                                SelectionMode="SelectionMode.SingleSelection"
+                                Color="Color.Primary" Rounded Delimiters>
+                    <MudToggleItem Value="@("windows")">
+                        <MudIcon Icon="@Icons.Material.Filled.Window" Class="mr-1" Size="Size.Small" />
+                        Windows Authentication
+                    </MudToggleItem>
+                    <MudToggleItem Value="@("sql")">
+                        <MudIcon Icon="@Icons.Material.Filled.Person" Class="mr-1" Size="Size.Small" />
+                        SQL Server Authentication
+                    </MudToggleItem>
+                </MudToggleGroup>
+            </MudItem>
+
+            <!-- SQL auth fields -->
+            @if (!_s.UseWindowsAuth)
+            {
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" @bind-Value="_s.Username"
+                                  Label="Username"
+                                  Placeholder="sa"
+                                  Variant="Variant.Outlined"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Person" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" @bind-Value="_s.Password"
+                                  Label="Password"
+                                  Variant="Variant.Outlined"
+                                  InputType="@(_showPwd ? InputType.Text : InputType.Password)"
+                                  Adornment="Adornment.End"
+                                  AdornmentIcon="@(_showPwd ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                                  OnAdornmentClick="() => _showPwd = !_showPwd" />
+                </MudItem>
+            }
+            else
+            {
+                <MudItem xs="12">
+                    <MudAlert Severity="Severity.Info" Dense>
+                        The IIS App Pool identity will be used to connect. Make sure it has access to SQL Server.
+                    </MudAlert>
+                </MudItem>
+            }
+
+            <!-- SSL / Certificate options -->
+            <MudItem xs="12">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Security / Certificate</MudText>
+                <MudStack Row Spacing="4" AlignItems="AlignItems.Center">
+                    <MudCheckBox T="bool" @bind-Value="_s.TrustServerCertificate"
+                                 Label="Trust Server Certificate"
+                                 Color="Color.Primary" />
+                    <MudCheckBox T="bool" @bind-Value="_s.Encrypt"
+                                 Label="Encrypt Connection (SSL)"
+                                 Color="Color.Primary" />
+                </MudStack>
+                <MudText Typo="Typo.caption" Class="text-muted mt-1">
+                    For local/internal servers: Trust=✅ Encrypt=❌. For remote/cloud SQL: Trust=✅ Encrypt=✅.
+                </MudText>
+            </MudItem>
+
+            <!-- Connection string preview -->
+            <MudItem xs="12">
+                <MudText Typo="Typo.subtitle2" Class="mb-1">Connection String Preview</MudText>
+                <div style="background:var(--mud-palette-background-grey);border-radius:6px;padding:10px 14px;font-family:monospace;font-size:.8rem;word-break:break-all;color:var(--mud-palette-text-secondary)">
+                    @DbSettings.BuildConnectionString(_s)
+                </div>
+            </MudItem>
+
+            <!-- Test result -->
+            @if (_testResult is not null)
+            {
+                <MudItem xs="12">
+                    <MudAlert Severity="@(_testSuccess ? Severity.Success : Severity.Error)" Dense>
+                        @_testResult
+                    </MudAlert>
+                </MudItem>
+            }
+
+        </MudGrid>
+
+        <!-- Actions -->
+        <MudStack Row Spacing="2" Class="mt-6">
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.NetworkCheck"
+                       OnClick="TestConnection"
+                       Disabled="_busy">
+                @if (_busy && _action == "test")
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate Class="mr-2" />
+                }
+                Test Connection
+            </MudButton>
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="Save"
+                       Disabled="_busy">
+                @if (_busy && _action == "save")
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate Class="mr-2" />
+                }
+                Save Settings
+            </MudButton>
+
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Default"
+                       StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="Reset">
+                Reset
+            </MudButton>
+        </MudStack>
+
+        <MudText Typo="Typo.caption" Class="text-muted mt-3">
+            ⚠️ After saving, restart the application for the new connection to take effect.
+        </MudText>
+
+    </div>
+</div>
+
+@code {
+    private DbConnectionSettings _s = new();
+    private bool _busy;
+    private string _action = "";
+    private string? _testResult;
+    private bool _testSuccess;
+    private bool _showPwd;
+
+    protected override void OnInitialized()
+    {
+        _s = DbSettings.GetCurrentSettings();
+    }
+
+    private void OnAuthTypeChanged(string value)
+    {
+        _s.UseWindowsAuth = value == "windows";
+    }
+
+    private async Task TestConnection()
+    {
+        _busy = true; _action = "test"; _testResult = null;
+        try
+        {
+            var (ok, msg) = await DbSettings.TestConnectionAsync(_s);
+            _testSuccess = ok;
+            _testResult  = msg;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task Save()
+    {
+        _busy = true; _action = "save";
+        try
+        {
+            await DbSettings.SaveConnectionStringAsync(_s);
+            Snackbar.Add("✅ Settings saved to appsettings.json. Restart the app to apply.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"❌ Failed to save: {ex.Message}", Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
+    private void Reset()
+    {
+        _s = DbSettings.GetCurrentSettings();
+        _testResult = null;
+        StateHasChanged();
+    }
+}

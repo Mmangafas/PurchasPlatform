@@ -1,0 +1,27 @@
+@using SmartPricing.Domain.Enums
+
+<span class="@CssClass">@Label</span>
+
+@code {
+    [Parameter] public BatchStatus Status { get; set; }
+
+    private string CssClass => Status switch
+    {
+        BatchStatus.Draft     => "status-draft",
+        BatchStatus.Submitted => "status-submitted",
+        BatchStatus.Approved  => "status-approved",
+        BatchStatus.Rejected  => "status-rejected",
+        BatchStatus.Cancelled => "status-draft",
+        _ => "status-draft"
+    };
+
+    private string Label => Status switch
+    {
+        BatchStatus.Draft     => "📝 Draft",
+        BatchStatus.Submitted => "📤 Submitted",
+        BatchStatus.Approved  => "✅ Approved",
+        BatchStatus.Rejected  => "❌ Rejected",
+        BatchStatus.Cancelled => "🚫 Cancelled",
+        _ => Status.ToString()
+    };
+}

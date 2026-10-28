@@ -1,0 +1,138 @@
+@page "/batches"
+@attribute [Authorize(Policy = "RequireRequester")]
+@inject IBatchService BatchSvc
+@inject IDialogService Dialog
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject AppStateService AppState
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Domain.Enums
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<PageTitle>Batches Ανατίμησης — Smart Pricing</PageTitle>
+
+<div class="sp-page-header">
+    <MudStack Row AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+        <div>
+            <MudText Typo="Typo.h4" Class="fw-700">Batches Ανατίμησης</MudText>
+            <div class="text-muted">Price Change Batches</div>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="CreateBatch">
+            Νέο Batch / New Batch
+        </MudButton>
+    </MudStack>
+</div>
+
+<!-- Status filter tabs -->
+<MudTabs @bind-ActivePanelIndex="_tabIndex" Rounded Outlined Color="Color.Primary" Class="mb-4">
+    <MudTabPanel Text="Όλα / All" />
+    <MudTabPanel Text="📝 Draft" />
+    <MudTabPanel Text="📤 Submitted" />
+    <MudTabPanel Text="✅ Approved" />
+    <MudTabPanel Text="❌ Rejected" />
+</MudTabs>
+
+<div class="sp-card">
+    <MudTable Items="FilteredBatches" Hover Dense Elevation="0" Loading="_loading">
+        <HeaderContent>
+            <MudTh>ID</MudTh>
+            <MudTh>Batch Name</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh>Γραμμές / Lines</MudTh>
+            <MudTh>Εγκρίθηκαν</MudTh>
+            <MudTh>Απορρίφθηκαν</MudTh>
+            <MudTh>Χρήστης</MudTh>
+            <MudTh>Ημερομηνία</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd Class="text-mono text-muted" Style="font-size:.8rem">#@context.BatchID</MudTd>
+            <MudTd>
+                <MudLink Href="@($"/batches/{context.BatchID}")" Underline="Underline.Hover" Style="font-weight:600">
+                    @context.BatchName
+                </MudLink>
+            </MudTd>
+            <MudTd><StatusBadge Status="@context.Status" /></MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="Color.Default">@context.TotalLines</MudChip>
+            </MudTd>
+            <MudTd>
+                @if (context.ApprovedLines > 0)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success">✅ @context.ApprovedLines</MudChip>
+                }
+            </MudTd>
+            <MudTd>
+                @if (context.RejectedLines > 0)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error">❌ @context.RejectedLines</MudChip>
+                }
+            </MudTd>
+            <MudTd>@context.CreatedByName</MudTd>
+            <MudTd Class="text-mono" Style="font-size:.8rem">@context.CreatedAt.ToString("dd/MM/yy HH:mm")</MudTd>
+            <MudTd>
+                <MudStack Row Spacing="1">
+                    <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small"
+                                   OnClick="@(() => Nav.NavigateTo($"/batches/{context.BatchID}"))" />
+                    @if (context.Status == BatchStatus.Draft && context.TotalLines > 0)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Send" Size="Size.Small"
+                                       Color="Color.Primary" title="Submit for approval"
+                                       OnClick="@(() => SubmitBatch(context.BatchID))" />
+                    }
+                </MudStack>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-6 text-muted" Style="text-align:center">
+                Δεν υπάρχουν batches / No batches found
+            </MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>
+
+@code {
+    private List<BatchSummaryDto> _batches = [];
+    private bool _loading = true;
+    private int _tabIndex;
+
+    private IEnumerable<BatchSummaryDto> FilteredBatches => _tabIndex switch
+    {
+        1 => _batches.Where(b => b.Status == BatchStatus.Draft),
+        2 => _batches.Where(b => b.Status == BatchStatus.Submitted),
+        3 => _batches.Where(b => b.Status == BatchStatus.Approved),
+        4 => _batches.Where(b => b.Status == BatchStatus.Rejected),
+        _ => _batches
+    };
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        _batches = await BatchSvc.GetAllAsync();
+        _loading = false;
+    }
+
+    private async Task CreateBatch()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
+        var dialog = await Dialog.ShowAsync<CreateBatchDialog>("Νέο Batch", options);
+        var result = await dialog.Result;
+        if (!result!.Canceled) await LoadData();
+    }
+
+    private async Task SubmitBatch(int batchID)
+    {
+        var ok = await Dialog.ShowMessageBox("Υποβολή / Submit", "Υποβάλετε το batch για έγκριση;", "Ναι", "Όχι");
+        if (ok == true)
+        {
+            await BatchSvc.SubmitAsync(batchID, AppState.CurrentUserID);
+            Snackbar.Add("Το batch υποβλήθηκε για έγκριση.", Severity.Success);
+            await LoadData();
+        }
+    }
+}

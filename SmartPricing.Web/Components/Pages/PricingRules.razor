@@ -1,0 +1,180 @@
+@page "/pricing-rules"
+@attribute [Authorize(Policy = "RequireApprover")]
+@inject IPricingRuleService RuleSvc
+@inject IMasterDataService MasterSvc
+@inject IDialogService Dialog
+@inject ISnackbar Snackbar
+@inject AppStateService AppState
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<PageTitle>Κανόνες Τιμολόγησης — Smart Pricing</PageTitle>
+
+<div class="sp-page-header">
+    <MudStack Row AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+        <div>
+            <MudText Typo="Typo.h4" Class="fw-700">Κανόνες Τιμολόγησης</MudText>
+            <div class="text-muted">Pricing Rules — Target Margins per Category / Channel</div>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenAddDialog">
+            Νέος Κανόνας / New Rule
+        </MudButton>
+    </MudStack>
+</div>
+
+<!-- Legend -->
+<div class="sp-card mb-4" style="padding:14px 20px">
+    <MudStack Row Spacing="4" AlignItems="AlignItems.Center">
+        <MudText Typo="Typo.caption" Class="fw-700 text-muted">ΧΡΩΜΑΤΙΚΟΙ ΔΕΙΚΤΕΣ / COLOR INDICATORS:</MudText>
+        <span class="indicator-green">🟢 ≥ Target Margin</span>
+        <span class="indicator-orange">🟡 Within 2% of Target</span>
+        <span class="indicator-red">🔴 Below Target</span>
+    </MudStack>
+</div>
+
+<div class="sp-card">
+    <MudTable Items="_rules" Hover Dense Elevation="0" Loading="_loading">
+        <HeaderContent>
+            <MudTh>Κατηγορία / Category</MudTh>
+            <MudTh>Κανάλι / Channel</MudTh>
+            <MudTh Style="text-align:right">Target GM%</MudTh>
+            <MudTh Style="text-align:right">Markup%</MudTh>
+            <MudTh>Στρογγυλ. / Rounding</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>
+                @if (context.CategoryName is not null)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Icon="@Icons.Material.Filled.Category">
+                        @context.CategoryName
+                    </MudChip>
+                }
+                else
+                {
+                    <span class="text-muted">Όλες / All</span>
+                }
+            </MudTd>
+            <MudTd>
+                @if (context.ChannelName is not null)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Secondary">@context.ChannelName</MudChip>
+                }
+                else
+                {
+                    <span class="text-muted">Όλα / All</span>
+                }
+            </MudTd>
+            <MudTd Style="text-align:right">
+                @if (context.TargetMarginPercent.HasValue)
+                {
+                    <strong class="price-value" style="color:var(--sp-green)">
+                        @context.TargetMarginPercent.Value.ToString("F2")%
+                    </strong>
+                }
+                else { <span class="text-muted">—</span> }
+            </MudTd>
+            <MudTd Style="text-align:right">
+                @if (context.MarkupPercent.HasValue)
+                {
+                    <span class="price-value">@context.MarkupPercent.Value.ToString("F2")%</span>
+                }
+                else { <span class="text-muted">—</span> }
+            </MudTd>
+            <MudTd>
+                @if (context.RoundingPattern is not null)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Icon="@Icons.Material.Filled.Tag">
+                        @context.RoundingPattern
+                    </MudChip>
+                }
+                else { <span class="text-muted">—</span> }
+            </MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">
+                    @(context.IsActive ? "✅ Ενεργός" : "⏸ Ανενεργός")
+                </MudChip>
+            </MudTd>
+            <MudTd>
+                <MudStack Row Spacing="1">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                   OnClick="@(() => OpenEditDialog(context))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                   Color="Color.Error" OnClick="@(() => DeleteRule(context.RuleID))" />
+                </MudStack>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-6 text-muted" Style="text-align:center">
+                Δεν υπάρχουν κανόνες. Δημιουργήστε κανόνες τιμολόγησης για τις κατηγορίες σας.
+            </MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>
+
+@code {
+    private List<PricingRuleDto> _rules = [];
+    private List<Domain.Entities.Category> _categories = [];
+    private List<Domain.Entities.Channel> _channels = [];
+    private List<Domain.Entities.RoundingRule> _roundingRules = [];
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _categories = await MasterSvc.GetCategoriesAsync();
+        _channels = await MasterSvc.GetChannelsAsync();
+        _roundingRules = await MasterSvc.GetRoundingRulesAsync();
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        _rules = await RuleSvc.GetAllAsync();
+        _loading = false;
+    }
+
+    private async Task OpenAddDialog()
+    {
+        var parameters = new DialogParameters
+        {
+            ["Categories"] = _categories,
+            ["Channels"] = _channels,
+            ["RoundingRules"] = _roundingRules
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await Dialog.ShowAsync<PricingRuleDialog>("Νέος Κανόνας", parameters, options);
+        var result = await dialog.Result;
+        if (!result!.Canceled) await LoadData();
+    }
+
+    private async Task OpenEditDialog(PricingRuleDto rule)
+    {
+        var parameters = new DialogParameters
+        {
+            ["Rule"] = rule,
+            ["Categories"] = _categories,
+            ["Channels"] = _channels,
+            ["RoundingRules"] = _roundingRules
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await Dialog.ShowAsync<PricingRuleDialog>("Επεξεργασία Κανόνα", parameters, options);
+        var result = await dialog.Result;
+        if (!result!.Canceled) await LoadData();
+    }
+
+    private async Task DeleteRule(int ruleID)
+    {
+        var ok = await Dialog.ShowMessageBox("Διαγραφή", "Διαγραφή κανόνα τιμολόγησης;", "Ναι", "Όχι");
+        if (ok == true)
+        {
+            await RuleSvc.DeleteAsync(ruleID);
+            Snackbar.Add("Διαγράφηκε.", Severity.Success);
+            await LoadData();
+        }
+    }
+}

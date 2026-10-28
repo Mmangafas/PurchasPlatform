@@ -1,0 +1,51 @@
+@page "/login"
+@layout EmptyLayout
+@using MudBlazor
+
+<PageTitle>Login — Smart Pricing Control</PageTitle>
+
+<div class="sp-login-page">
+    <div class="sp-login-card">
+        <div class="sp-login-logo">
+            Smart<span>Pricing</span>
+        </div>
+        <div class="text-muted mb-6">Έξυπνη Διαχείριση Τιμών</div>
+
+        <form method="post" action="/account/login">
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+            <AntiforgeryToken />
+
+            <MudStack Spacing="3">
+                <MudTextField T="string" Name="username" Label="Username / Χρήστης"
+                              Variant="Variant.Outlined" Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Person" />
+
+                <MudTextField T="string" Name="password" Label="Password / Κωδικός"
+                              Variant="Variant.Outlined"
+                              InputType="InputType.Password"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@Icons.Material.Filled.Visibility" />
+
+                @if (Error is not null)
+                {
+                    <MudAlert Severity="Severity.Error" Dense>@Error</MudAlert>
+                }
+
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled"
+                           Color="Color.Primary" FullWidth Size="Size.Large"
+                           Style="font-weight:700;letter-spacing:.5px">
+                    Sign In / Σύνδεση
+                </MudButton>
+            </MudStack>
+        </form>
+
+        <div class="text-muted mt-4" style="font-size:.75rem;text-align:center">
+            Default: admin / Admin@123
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter][SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    [Parameter][SupplyParameterFromQuery] public string? Error { get; set; }
+}

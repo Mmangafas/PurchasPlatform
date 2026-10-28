@@ -1,0 +1,130 @@
+@inject ISupplierPriceService PriceSvc
+@inject IMasterDataService MasterSvc
+@inject AppStateService AppState
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">➕ Νέα Τιμή Προμηθευτή / New Supplier Price</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudSelect @bind-Value="_supplierID" Label="Προμηθευτής / Supplier *"
+                       Variant="Variant.Outlined" Required>
+                @foreach (var s in _suppliers)
+                {
+                    <MudSelectItem Value="@s.SupplierID">@s.SupplierName (@s.ERPSupplierCode)</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect @bind-Value="_itemID" Label="Είδος / Item *"
+                       Variant="Variant.Outlined" Required Clearable>
+                @foreach (var i in _items)
+                {
+                    <MudSelectItem Value="@i.ItemID">@i.ItemName (@i.ERPItemCode)</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="6">
+                    <MudNumericField @bind-Value="_basePrice" Label="Βασική Τιμή / Base Price *"
+                                     Variant="Variant.Outlined" Format="N4" Min="0" Required />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudNumericField @bind-Value="_extraCharges" Label="Επιβαρύνσεις / Extra Charges"
+                                     Variant="Variant.Outlined" Format="N4" Min="0" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="6">
+                    <MudTextField @bind-Value="_currency" Label="Νόμισμα / Currency"
+                                  Variant="Variant.Outlined" Placeholder="EUR" MaxLength="10" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="6">
+                    <MudDatePicker @bind-Date="_validFrom" Label="Ισχύς Από / Valid From *"
+                                   Variant="Variant.Outlined" DateFormat="dd/MM/yyyy" Required />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudDatePicker @bind-Date="_validTo" Label="Ισχύς Έως / Valid To"
+                                   Variant="Variant.Outlined" DateFormat="dd/MM/yyyy" Clearable />
+                </MudItem>
+            </MudGrid>
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense>@_error</MudAlert>
+            }
+
+            <div class="sp-card" style="padding:12px 16px;background:#F8FAFC">
+                <MudText Typo="Typo.caption" Class="text-muted">Σύνολο Κόστος / Total Cost:</MudText>
+                <MudText Typo="Typo.h6" Class="fw-700 text-mono">
+                    @((_basePrice + _extraCharges).ToString("N4")) @(_currency ?? "EUR")
+                </MudText>
+            </div>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">Ακύρωση / Cancel</MudButton>
+        <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary" Disabled="_saving">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate Class="mr-2" /> }
+            Αποθήκευση / Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private List<Domain.Entities.Supplier> _suppliers = [];
+    private List<Domain.Entities.Item> _items = [];
+    private int _supplierID;
+    private int _itemID;
+    private decimal _basePrice;
+    private decimal _extraCharges;
+    private string _currency = "EUR";
+    private DateTime? _validFrom = DateTime.Today;
+    private DateTime? _validTo;
+    private bool _saving;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _suppliers = await MasterSvc.GetSuppliersAsync();
+        _items = await MasterSvc.GetItemsAsync();
+    }
+
+    private Task<IEnumerable<Domain.Entities.Item>> SearchItems(string? search, CancellationToken ct) =>
+        Task.FromResult(_items.Where(i => string.IsNullOrWhiteSpace(search) ||
+            i.ItemName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            i.ERPItemCode.Contains(search, StringComparison.OrdinalIgnoreCase)));
+
+    private async Task Submit()
+    {
+        _error = null;
+        if (_supplierID == 0 || _itemID == 0 || _basePrice <= 0 || _validFrom is null)
+        {
+            _error = "Συμπληρώστε όλα τα υποχρεωτικά πεδία."; return;
+        }
+        _saving = true;
+        try
+        {
+            await PriceSvc.CreateAsync(new CreateSupplierPriceDto(
+                _supplierID, _itemID, _basePrice, _extraCharges, _currency,
+                DateOnly.FromDateTime(_validFrom.Value),
+                _validTo.HasValue ? DateOnly.FromDateTime(_validTo.Value) : null,
+                AppState.CurrentUserID));
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -1,0 +1,71 @@
+@inject IUserService UserSvc
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">✏️ Ρόλοι για @User?.DisplayName</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="2">
+            @foreach (var role in _roles)
+            {
+                <MudCheckBox @bind-Value="role.Selected" Label="@role.Name" Color="Color.Primary" />
+            }
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense>@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Ακύρωση</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" Disabled="_saving">
+            Αποθήκευση
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public UserDto? User { get; set; }
+
+    private string? _error;
+    private bool _saving;
+
+    private List<RoleCheck> _roles = [];
+
+    protected override void OnParametersSet()
+    {
+        _roles =
+        [
+            new("Requester", User?.Roles.Contains("Requester") ?? false),
+            new("Reviewer",  User?.Roles.Contains("Reviewer")  ?? false),
+            new("Approver",  User?.Roles.Contains("Approver")  ?? false),
+            new("Admin",     User?.Roles.Contains("Admin")     ?? false),
+        ];
+    }
+
+    private async Task Submit()
+    {
+        var selected = _roles.Where(r => r.Selected).Select(r => r.Name).ToList();
+        if (!selected.Any()) { _error = "Επιλέξτε τουλάχιστον έναν ρόλο."; return; }
+        _saving = true;
+        try
+        {
+            await UserSvc.UpdateRolesAsync(User!.UserID, selected);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private class RoleCheck(string name, bool selected)
+    {
+        public string Name { get; } = name;
+        public bool Selected { get; set; } = selected;
+    }
+}

@@ -1,0 +1,49 @@
+@* CreateBatchDialog.razor *@
+@inject IBatchService BatchSvc
+@inject AppStateService AppState
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">📦 Νέο Batch Ανατίμησης</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Όνομα Batch / Batch Name *"
+                      Variant="Variant.Outlined" Placeholder="π.χ. Ανατίμηση Απριλίου 2025"
+                      Required AutoFocus />
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense Class="mt-2">@_error</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Ακύρωση</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" Disabled="_saving">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate Class="mr-1" /> }
+            Δημιουργία / Create
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    private string _name = "";
+    private string? _error;
+    private bool _saving;
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_name)) { _error = "Εισάγετε όνομα batch."; return; }
+        _saving = true;
+        try
+        {
+            var id = await BatchSvc.CreateAsync(new CreateBatchDto(_name, AppState.CurrentUserID));
+            MudDialog.Close(DialogResult.Ok(id));
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

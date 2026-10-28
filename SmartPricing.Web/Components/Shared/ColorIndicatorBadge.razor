@@ -1,0 +1,18 @@
+@using SmartPricing.Domain.Enums
+
+<span class="@CssClass">@Label</span>
+
+@code {
+    [Parameter] public ColorIndicator Indicator { get; set; }
+    [Parameter] public decimal Value { get; set; }
+
+    private string CssClass => Indicator switch
+    {
+        ColorIndicator.Green  => "indicator-green",
+        ColorIndicator.Orange => "indicator-orange",
+        ColorIndicator.Red    => "indicator-red",
+        _ => "indicator-green"
+    };
+
+    private string Label => $"{(Indicator == ColorIndicator.Green ? "🟢" : Indicator == ColorIndicator.Orange ? "🟡" : "🔴")} {Value:F2}%";
+}

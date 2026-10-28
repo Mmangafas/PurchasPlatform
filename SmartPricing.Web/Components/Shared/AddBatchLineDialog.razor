@@ -1,0 +1,101 @@
+@inject IBatchService BatchSvc
+@inject IMasterDataService MasterSvc
+@inject ISellingPriceService SellingPriceSvc
+@inject AppStateService AppState
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">➕ Προσθήκη Γραμμής / Add Price Line</MudText></TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudSelect Value="_itemID" Label="Είδος / Item *" Variant="Variant.Outlined"
+                       Required ValueChanged="@((int v) => OnItemChanged(v))">
+                @foreach (var i in _items)
+                {
+                    <MudSelectItem Value="@i.ItemID">@i.ItemName (@i.ERPItemCode)</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect @bind-Value="_channelID" Label="Κανάλι / Channel *" Variant="Variant.Outlined" Required>
+                @foreach (var ch in _channels)
+                {
+                    <MudSelectItem Value="@ch.ChannelID">@ch.Name</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudNumericField @bind-Value="_newPrice" Label="Νέα Τιμή / New Price *"
+                             Variant="Variant.Outlined" Format="N2" Min="0.01m" Required />
+
+            @if (_suggestedPrice.HasValue)
+            {
+                <MudAlert Severity="Severity.Info" Dense>
+                    💡 Προτεινόμενη τιμή / Suggested: <strong>@_suggestedPrice?.ToString("N2")</strong>
+                    <MudButton Size="Size.Small" OnClick="UseSuggested" Variant="Variant.Text">Χρήση / Use</MudButton>
+                </MudAlert>
+            }
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense>@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Ακύρωση</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" Disabled="_saving">
+            Προσθήκη / Add
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int BatchID { get; set; }
+
+    private List<Domain.Entities.Item> _items = [];
+    private List<Domain.Entities.Channel> _channels = [];
+    private int _itemID;
+    private int _channelID;
+    private decimal _newPrice;
+    private decimal? _suggestedPrice;
+    private string? _error;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _items = await MasterSvc.GetItemsAsync();
+        _channels = await MasterSvc.GetChannelsAsync();
+    }
+
+    private async Task OnItemChanged(int itemID)
+    {
+        _itemID = itemID;
+        if (_itemID > 0 && _channelID > 0)
+        {
+            var prices = await SellingPriceSvc.GetAllAsync();
+            var calc = prices.FirstOrDefault(p => p.ItemID == _itemID && p.ChannelID == _channelID);
+            _suggestedPrice = calc?.SuggestedPrice;
+        }
+    }
+
+    private void UseSuggested() { if (_suggestedPrice.HasValue) _newPrice = _suggestedPrice.Value; }
+
+    private async Task Submit()
+    {
+        _error = null;
+        if (_itemID == 0 || _channelID == 0 || _newPrice <= 0) { _error = "Συμπληρώστε όλα τα πεδία."; return; }
+        _saving = true;
+        try
+        {
+            await BatchSvc.AddLineAsync(new AddBatchLineDto(BatchID, _itemID, _channelID, _newPrice, AppState.CurrentUserID));
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

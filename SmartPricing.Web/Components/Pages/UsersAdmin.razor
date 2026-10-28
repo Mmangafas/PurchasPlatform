@@ -1,0 +1,134 @@
+@page "/admin/users"
+@attribute [Authorize(Policy = "RequireAdmin")]
+@inject IUserService UserSvc
+@inject IDialogService Dialog
+@inject ISnackbar Snackbar
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using MudBlazor
+
+<PageTitle>Χρήστες & Ρόλοι — Smart Pricing</PageTitle>
+
+<div class="sp-page-header">
+    <MudStack Row AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+        <div>
+            <MudText Typo="Typo.h4" Class="fw-700">Χρήστες & Ρόλοι</MudText>
+            <div class="text-muted">User & Role Management</div>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PersonAdd"
+                   OnClick="OpenAddDialog">
+            Νέος Χρήστης / New User
+        </MudButton>
+    </MudStack>
+</div>
+
+<!-- Role Legend -->
+<MudGrid Spacing="2" Class="mb-4">
+    @foreach (var role in _roles)
+    {
+        <MudItem>
+            <div class="sp-card" style="padding:10px 16px;min-width:140px">
+                <div style="font-weight:700;font-size:.8rem">@role.Name</div>
+                <div class="text-muted" style="font-size:.72rem">@role.Desc</div>
+            </div>
+        </MudItem>
+    }
+</MudGrid>
+
+<div class="sp-card">
+    <MudTable Items="_users" Hover Dense Elevation="0" Loading="_loading">
+        <HeaderContent>
+            <MudTh>Username</MudTh>
+            <MudTh>Εμφανιζόμενο Όνομα</MudTh>
+            <MudTh>Email</MudTh>
+            <MudTh>Ρόλοι / Roles</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd Class="text-mono fw-700">@context.UserName</MudTd>
+            <MudTd>@context.DisplayName</MudTd>
+            <MudTd Class="text-muted">@(context.Email ?? "—")</MudTd>
+            <MudTd>
+                <MudStack Row Spacing="1">
+                    @foreach (var role in context.Roles)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="@RoleColor(role)">@role</MudChip>
+                    }
+                </MudStack>
+            </MudTd>
+            <MudTd>
+                <MudStack Row Spacing="1">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                   OnClick="@(() => OpenEditRolesDialog(context))" />
+                    @if (context.UserName != "admin")
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.PersonOff" Size="Size.Small"
+                                       Color="Color.Error" OnClick="@(() => DeactivateUser(context.UserID))"
+                                       title="Απενεργοποίηση / Deactivate" />
+                    }
+                </MudStack>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-4 text-muted">Δεν βρέθηκαν χρήστες.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>
+
+@code {
+    private List<UserDto> _users = [];
+    private bool _loading = true;
+
+    private readonly List<(string Name, string Desc)> _roles =
+    [
+        ("Requester", "Αιτών — δημιουργεί batches"),
+        ("Reviewer", "Εξετάζει γραμμές"),
+        ("Approver", "Εγκρίνει batches"),
+        ("Admin", "Πλήρης πρόσβαση")
+    ];
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        _users = await UserSvc.GetAllAsync();
+        _loading = false;
+    }
+
+    private Color RoleColor(string role) => role switch
+    {
+        "Admin" => Color.Error,
+        "Approver" => Color.Warning,
+        "Reviewer" => Color.Info,
+        _ => Color.Default
+    };
+
+    private async Task OpenAddDialog()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await Dialog.ShowAsync<CreateUserDialog>("Νέος Χρήστης", options);
+        var result = await dialog.Result;
+        if (!result!.Canceled) await LoadData();
+    }
+
+    private async Task OpenEditRolesDialog(UserDto user)
+    {
+        var parameters = new DialogParameters { ["User"] = user };
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
+        var dialog = await Dialog.ShowAsync<EditUserRolesDialog>("Επεξεργασία Ρόλων", parameters, options);
+        var result = await dialog.Result;
+        if (!result!.Canceled) await LoadData();
+    }
+
+    private async Task DeactivateUser(int userID)
+    {
+        var ok = await Dialog.ShowMessageBox("Απενεργοποίηση", "Απενεργοποίηση χρήστη;", "Ναι", "Όχι");
+        if (ok == true)
+        {
+            await UserSvc.DeactivateAsync(userID);
+            Snackbar.Add("Χρήστης απενεργοποιήθηκε.", Severity.Warning);
+            await LoadData();
+        }
+    }
+}

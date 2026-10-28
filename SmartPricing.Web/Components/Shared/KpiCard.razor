@@ -1,0 +1,27 @@
+@using MudBlazor
+
+<div class="sp-kpi-card" style="@(_highlight ? "border-left:4px solid " + Color : "")">
+    <MudIcon Icon="@Icon" Class="kpi-icon" Style="@($"color:{Color}")" />
+    <div class="kpi-value" style="color:@Color">@Value</div>
+    <div class="kpi-label">@Title</div>
+    @if (!string.IsNullOrEmpty(TitleEn))
+    {
+        <div class="text-muted" style="font-size:.72rem">@TitleEn</div>
+    }
+    @if (!string.IsNullOrEmpty(SubValue))
+    {
+        <div style="font-size:.8rem;margin-top:4px;color:var(--sp-text-muted)">@SubValue</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string TitleEn { get; set; } = "";
+    [Parameter] public string Value { get; set; } = "0";
+    [Parameter] public string? SubValue { get; set; }
+    [Parameter] public string Icon { get; set; } = Icons.Material.Filled.Info;
+    [Parameter] public string Color { get; set; } = "#3B82F6";
+    [Parameter] public bool Highlight { get; set; }
+
+    private bool _highlight => Highlight;
+}

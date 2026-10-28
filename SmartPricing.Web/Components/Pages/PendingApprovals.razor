@@ -1,0 +1,122 @@
+@page "/batches/pending"
+@attribute [Authorize(Policy = "RequireReviewer")]
+@inject IBatchService BatchSvc
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject AppStateService AppState
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Domain.Enums
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<PageTitle>Εκκρεμείς Εγκρίσεις — Smart Pricing</PageTitle>
+
+<div class="sp-page-header">
+    <MudText Typo="Typo.h4" Class="fw-700">Εκκρεμείς Εγκρίσεις</MudText>
+    <div class="text-muted">Pending Batch Approvals</div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate Color="Color.Primary" />
+}
+else if (!_batches.Any())
+{
+    <MudStack AlignItems="AlignItems.Center" Class="pa-12">
+        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Style="font-size:4rem" />
+        <MudText Typo="Typo.h6" Class="text-muted mt-2">
+            Δεν υπάρχουν εκκρεμείς εγκρίσεις! / No pending approvals!
+        </MudText>
+    </MudStack>
+}
+else
+{
+    @foreach (var batch in _batches)
+    {
+        <div class="sp-card mb-4">
+            <div class="sp-card-header">
+                <MudStack Row AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Style="width:100%">
+                    <MudStack Row Spacing="2" AlignItems="AlignItems.Center">
+                        <MudText Typo="Typo.h6" Class="fw-700">@batch.BatchName</MudText>
+                        <StatusBadge Status="@batch.Status" />
+                    </MudStack>
+                    <MudStack Row Spacing="2">
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                   OnClick="@(() => Nav.NavigateTo($"/batches/{batch.BatchID}"))">
+                            Προβολή / View
+                        </MudButton>
+                        @if (AppState.IsApprover)
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Success" Size="Size.Small"
+                                       OnClick="@(() => QuickApproveAll(batch.BatchID))"
+                                       Disabled="@(batch.PendingLines > 0)">
+                                ✅ Έγκριση Batch
+                            </MudButton>
+                        }
+                    </MudStack>
+                </MudStack>
+            </div>
+            <div style="padding:16px 24px">
+                <MudGrid Spacing="4">
+                    <MudItem xs="12" md="2">
+                        <div class="text-muted" style="font-size:.75rem;text-transform:uppercase;font-weight:700">Δημιουργός</div>
+                        <div style="font-weight:600">@batch.CreatedByName</div>
+                    </MudItem>
+                    <MudItem xs="12" md="2">
+                        <div class="text-muted" style="font-size:.75rem;text-transform:uppercase;font-weight:700">Ημερομηνία</div>
+                        <div class="text-mono">@batch.CreatedAt.ToString("dd/MM/yyyy HH:mm")</div>
+                    </MudItem>
+                    <MudItem xs="12" md="2">
+                        <div class="text-muted" style="font-size:.75rem;text-transform:uppercase;font-weight:700">Γραμμές / Lines</div>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default">@batch.TotalLines</MudChip>
+                    </MudItem>
+                    <MudItem xs="12" md="2">
+                        <div class="text-muted" style="font-size:.75rem;text-transform:uppercase;font-weight:700">Εγκρίθηκαν</div>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success">@batch.ApprovedLines</MudChip>
+                    </MudItem>
+                    <MudItem xs="12" md="2">
+                        <div class="text-muted" style="font-size:.75rem;text-transform:uppercase;font-weight:700">Απορρίφθηκαν</div>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error">@batch.RejectedLines</MudChip>
+                    </MudItem>
+                    <MudItem xs="12" md="2">
+                        <div class="text-muted" style="font-size:.75rem;text-transform:uppercase;font-weight:700">Εκκρεμείς</div>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">@batch.PendingLines</MudChip>
+                    </MudItem>
+                </MudGrid>
+
+                @if (batch.PendingLines > 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense Class="mt-3">
+                        ⚠️ Υπάρχουν @batch.PendingLines εκκρεμείς γραμμές. Εγκρίνετε τις γραμμές πρώτα.
+                    </MudAlert>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private List<BatchSummaryDto> _batches = [];
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _batches = await BatchSvc.GetByStatusAsync("Submitted");
+        _loading = false;
+    }
+
+    private async Task QuickApproveAll(int batchID)
+    {
+        try
+        {
+            await BatchSvc.ApproveBatchAsync(batchID, AppState.CurrentUserID);
+            Snackbar.Add("Batch εγκρίθηκε!", Severity.Success);
+            _batches = await BatchSvc.GetByStatusAsync("Submitted");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+}

@@ -1,0 +1,133 @@
+@inherits LayoutComponentBase
+@inject AppStateService AppState
+@inject NavigationManager Nav
+@inject IUserService UserService
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<MudThemeProvider Theme="_theme" />
+<MudSnackbarProvider />
+<MudDialogProvider />
+
+<MudLayout>
+    <!-- Top App Bar -->
+    <MudAppBar Elevation="0" Class="sp-appbar">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit"
+                       Edge="Edge.Start" OnClick="ToggleDrawer" />
+        <MudStack Row AlignItems="AlignItems.Center" Spacing="2" Class="ml-2">
+            <MudIcon Icon="@Icons.Material.Filled.PriceCheck" Style="color:var(--sp-accent)" Size="Size.Large" />
+            <MudText Typo="Typo.h6" Style="font-weight:700;letter-spacing:-.5px">
+                Smart<span style="color:var(--sp-accent)">Pricing</span>
+            </MudText>
+        </MudStack>
+        <MudSpacer />
+        @if (AppState.CurrentUser is not null)
+        {
+            <MudChip T="string" Icon="@Icons.Material.Filled.Person" Color="Color.Default" Size="Size.Small" Class="mr-2">
+                @AppState.CurrentUser.DisplayName
+            </MudChip>
+            <MudChip T="string" Color="Color.Primary" Size="Size.Small" Class="mr-4">
+                @string.Join(", ", AppState.CurrentUser.Roles)
+            </MudChip>
+            <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit"
+                           OnClick="Logout" title="Logout / Αποσύνδεση" />
+        }
+    </MudAppBar>
+
+    <!-- Sidebar -->
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="1" ClipMode="DrawerClipMode.Always" Class="sp-drawer">
+        <MudNavMenu>
+            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
+                Dashboard
+            </MudNavLink>
+
+            <MudNavGroup Title="Τιμές / Prices" Icon="@Icons.Material.Filled.EuroSymbol" Expanded>
+                <MudNavLink Href="/supplier-prices" Icon="@Icons.Material.Filled.LocalShipping">
+                    Τιμές Προμηθευτών
+                </MudNavLink>
+                <MudNavLink Href="/selling-prices" Icon="@Icons.Material.Filled.Sell">
+                    Τιμές Πώλησης
+                </MudNavLink>
+            </MudNavGroup>
+
+            <MudNavGroup Title="Εγκρίσεις / Approvals" Icon="@Icons.Material.Filled.AssignmentTurnedIn" Expanded>
+                <MudNavLink Href="/batches" Icon="@Icons.Material.Filled.Layers">
+                    Batches Ανατίμησης
+                </MudNavLink>
+                <MudNavLink Href="/batches/pending" Icon="@Icons.Material.Filled.PendingActions">
+                    Εκκρεμείς Εγκρίσεις
+                </MudNavLink>
+            </MudNavGroup>
+
+            @if (AppState.IsAdmin || AppState.IsApprover)
+            {
+                <MudNavGroup Title="Διαχείριση / Admin" Icon="@Icons.Material.Filled.Settings" Expanded>
+                    <MudNavLink Href="/pricing-rules" Icon="@Icons.Material.Filled.Rule">
+                        Κανόνες Τιμολόγησης
+                    </MudNavLink>
+                    @if (AppState.IsAdmin)
+                    {
+                        <MudNavLink Href="/erp-sync" Icon="@Icons.Material.Filled.Sync">
+                            ERP Synchronization
+                        </MudNavLink>
+                        <MudNavLink Href="/admin/users" Icon="@Icons.Material.Filled.People">
+                            Χρήστες & Ρόλοι
+                        </MudNavLink>
+                        <MudNavLink Href="/admin/settings" Icon="@Icons.Material.Filled.Settings">
+                            Ρυθμίσεις / Settings
+                        </MudNavLink>
+                    }
+                </MudNavGroup>
+            }
+
+            <MudNavLink Href="/audit-log" Icon="@Icons.Material.Filled.History">
+                Audit Log
+            </MudNavLink>
+        </MudNavMenu>
+    </MudDrawer>
+
+    <!-- Main Content -->
+    <MudMainContent Class="sp-main">
+        <MudContainer MaxWidth="MaxWidth.ExtraExtraLarge" Class="pa-6">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+    [Inject] private IUserService _userService { get; set; } = default!;
+
+    private MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#1A56DB",
+            Secondary = "#0E9F6E",
+            AppbarBackground = "#0F172A",
+            AppbarText = "#F8FAFC",
+            DrawerBackground = "#0F172A",
+            DrawerText = "#CBD5E1",
+            Surface = "#FFFFFF",
+            Background = "#F1F5F9",
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Reload user state from auth context if lost after circuit reconnect
+        if (AppState.CurrentUser is null)
+        {
+            // User will be set by Login page; here we just check
+        }
+    }
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private void Logout()
+    {
+        AppState.Clear();
+        Nav.NavigateTo("/logout", forceLoad: true);
+    }
+}

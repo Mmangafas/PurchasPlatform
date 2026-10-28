@@ -1,0 +1,21 @@
+@using SmartPricing.Domain.Enums
+
+<span class="@CssClass">@Label</span>
+
+@code {
+    [Parameter] public LineStatus Status { get; set; }
+
+    private string CssClass => Status switch
+    {
+        LineStatus.Approved => "indicator-green",
+        LineStatus.Rejected => "indicator-red",
+        _ => "status-draft"
+    };
+
+    private string Label => Status switch
+    {
+        LineStatus.Approved => "✅ Approved",
+        LineStatus.Rejected => "❌ Rejected",
+        _ => "⏳ Pending"
+    };
+}

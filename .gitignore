@@ -1,0 +1,14 @@
+## .NET / Visual Studio
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.rsuser
+*.pubxml.user
+TestResults/
+publish/
+
+## Local data-protection keys / secrets
+appsettings.*.local.json
+keys/

@@ -1,0 +1,147 @@
+@page "/"
+@attribute [Authorize]
+@inject IDashboardService DashboardSvc
+@inject AppStateService AppState
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Domain.Enums
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<PageTitle>Dashboard — Smart Pricing Control</PageTitle>
+
+<div class="sp-page-header">
+    <MudStack Row AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+        <div>
+            <MudText Typo="Typo.h4" Class="fw-700">Dashboard</MudText>
+            <div class="text-muted">Επισκόπηση συστήματος τιμολόγησης</div>
+        </div>
+        <MudText Typo="Typo.body2" Class="text-muted">@DateTime.Now.ToString("dddd, dd MMMM yyyy")</MudText>
+    </MudStack>
+</div>
+
+@if (_loading)
+{
+    <MudStack Spacing="3">
+        @for (int i = 0; i < 4; i++)
+        {
+            <MudSkeleton Height="120px" />
+        }
+    </MudStack>
+}
+else if (_kpi is not null)
+{
+    <!-- KPI Row -->
+    <MudGrid Spacing="3" Class="mb-6">
+        <MudItem xs="12" sm="6" md="3">
+            <KpiCard Title="Σύνολο Batches" TitleEn="Total Batches"
+                     Value="@_kpi.TotalBatches.ToString()"
+                     Icon="@Icons.Material.Filled.Layers"
+                     Color="#3B82F6" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <KpiCard Title="Εκκρεμείς Εγκρίσεις" TitleEn="Pending Approval"
+                     Value="@_kpi.PendingApproval.ToString()"
+                     Icon="@Icons.Material.Filled.PendingActions"
+                     Color="#D97706"
+                     Highlight="@(_kpi.PendingApproval > 0)" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <KpiCard Title="Εγκρίθηκαν Σήμερα" TitleEn="Approved Today"
+                     Value="@_kpi.ApprovedToday.ToString()"
+                     Icon="@Icons.Material.Filled.CheckCircle"
+                     Color="#059669" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <KpiCard Title="Κάτω από Στόχο" TitleEn="Below Target Margin"
+                     Value="@_kpi.ItemsBelowTargetMargin.ToString()"
+                     SubValue="@($"Avg Margin: {_kpi.AverageMarginPercent:F1}%")"
+                     Icon="@Icons.Material.Filled.TrendingDown"
+                     Color="#DC2626"
+                     Highlight="@(_kpi.ItemsBelowTargetMargin > 0)" />
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid Spacing="3">
+        <!-- Recent Batches -->
+        <MudItem xs="12" md="7">
+            <div class="sp-card">
+                <div class="sp-card-header">
+                    <h6>📦 Πρόσφατα Batches / Recent Batches</h6>
+                    <MudButton Href="/batches" Variant="Variant.Text" Size="Size.Small" Color="Color.Primary">
+                        Όλα →
+                    </MudButton>
+                </div>
+                <MudTable Items="_kpi.RecentBatches" Elevation="0" Dense Hover>
+                    <HeaderContent>
+                        <MudTh>Batch</MudTh>
+                        <MudTh>Status</MudTh>
+                        <MudTh>Χρήστης</MudTh>
+                        <MudTh>Ημερομηνία</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>
+                            <MudLink Href="@($"/batches/{context.BatchID}")" Underline="Underline.Hover">
+                                @context.BatchName
+                            </MudLink>
+                        </MudTd>
+                        <MudTd><StatusBadge Status="@context.Status" /></MudTd>
+                        <MudTd>@context.CreatedByName</MudTd>
+                        <MudTd Class="text-muted text-mono">@context.CreatedAt.ToString("dd/MM/yyyy HH:mm")</MudTd>
+                    </RowTemplate>
+                    <NoRecordsContent>
+                        <MudText Class="pa-4 text-muted">Δεν υπάρχουν batches ακόμα.</MudText>
+                    </NoRecordsContent>
+                </MudTable>
+            </div>
+        </MudItem>
+
+        <!-- Margin Alerts -->
+        <MudItem xs="12" md="5">
+            <div class="sp-card">
+                <div class="sp-card-header">
+                    <h6>⚠️ Ειδοποιήσεις Margin / Margin Alerts</h6>
+                </div>
+                @if (_kpi.MarginAlerts.Any())
+                {
+                    <MudList T="MarginAlertDto" Dense>
+                        @foreach (var alert in _kpi.MarginAlerts)
+                        {
+                            <MudListItem>
+                                <MudStack Row Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                                    <div>
+                                        <div style="font-weight:600;font-size:.875rem">@alert.ItemName</div>
+                                        <div class="text-muted" style="font-size:.75rem">@alert.ChannelName</div>
+                                    </div>
+                                    <div style="text-align:right">
+                                        <ColorIndicatorBadge Indicator="@alert.Indicator" Value="@alert.MarginPercent" />
+                                        <div class="text-muted" style="font-size:.72rem">Target: @alert.TargetMargin.ToString("F1")%</div>
+                                    </div>
+                                </MudStack>
+                            </MudListItem>
+                            <MudDivider />
+                        }
+                    </MudList>
+                }
+                else
+                {
+                    <MudStack AlignItems="AlignItems.Center" Class="pa-6">
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Large" />
+                        <MudText Class="text-muted">Όλα τα margins εντός στόχου!</MudText>
+                    </MudStack>
+                }
+            </div>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private DashboardKpiDto? _kpi;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _kpi = await DashboardSvc.GetKpisAsync();
+        _loading = false;
+    }
+}

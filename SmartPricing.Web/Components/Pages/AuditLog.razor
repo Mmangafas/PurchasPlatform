@@ -1,0 +1,106 @@
+@page "/audit-log"
+@attribute [Authorize(Policy = "RequireApprover")]
+@inject IAuditService AuditSvc
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using MudBlazor
+
+<PageTitle>Audit Log — Smart Pricing</PageTitle>
+
+<div class="sp-page-header">
+    <MudStack Row AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+        <div>
+            <MudText Typo="Typo.h4" Class="fw-700">Audit Log</MudText>
+            <div class="text-muted">Καταγραφή όλων των ενεργειών / Full action history</div>
+        </div>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadData">
+            Ανανέωση / Refresh
+        </MudButton>
+    </MudStack>
+</div>
+
+<!-- Filter bar -->
+<div class="sp-card mb-4" style="padding:12px 20px">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="4">
+            <MudTextField @bind-Value="_search" Placeholder="Αναζήτηση / Search..."
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Immediate />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudSelect @bind-Value="_entityFilter" Placeholder="Όλα τα Entities"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Clearable>
+                @foreach (var entity in _entities)
+                {
+                    <MudSelectItem Value="@entity">@entity</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
+</div>
+
+<div class="sp-card">
+    <MudTable Items="FilteredLogs" Hover Dense Elevation="0" Loading="_loading">
+        <HeaderContent>
+            <MudTh>Timestamp</MudTh>
+            <MudTh>Χρήστης / User</MudTh>
+            <MudTh>Ενέργεια / Action</MudTh>
+            <MudTh>Entity</MudTh>
+            <MudTh>ID</MudTh>
+            <MudTh>Παλιά Τιμή / Old</MudTh>
+            <MudTh>Νέα Τιμή / New</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd Class="text-mono" Style="font-size:.78rem;white-space:nowrap">
+                @context.Timestamp.ToString("dd/MM/yy HH:mm:ss")
+            </MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Person">
+                    @(context.UserDisplayName ?? "System")
+                </MudChip>
+            </MudTd>
+            <MudTd>
+                <span style="font-weight:600;font-size:.85rem">@context.Action</span>
+            </MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="Color.Info">@context.EntityName</MudChip>
+            </MudTd>
+            <MudTd Class="text-mono text-muted">@(context.EntityID?.ToString() ?? "—")</MudTd>
+            <MudTd Style="font-size:.78rem;max-width:180px;overflow:hidden;text-overflow:ellipsis"
+                   Class="text-muted">
+                @(context.OldValue ?? "—")
+            </MudTd>
+            <MudTd Style="font-size:.78rem;max-width:180px;overflow:hidden;text-overflow:ellipsis">
+                @(context.NewValue ?? "—")
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-4 text-muted">Δεν υπάρχουν εγγραφές ακόμα.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>
+
+@code {
+    private List<AuditLogDto> _logs = [];
+    private string _search = "";
+    private string? _entityFilter;
+    private bool _loading = true;
+
+    private IEnumerable<string> _entities => _logs.Select(l => l.EntityName).Distinct().OrderBy(e => e);
+
+    private IEnumerable<AuditLogDto> FilteredLogs => _logs
+        .Where(l => (string.IsNullOrWhiteSpace(_search) ||
+                     (l.UserDisplayName?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                     l.Action.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                     l.EntityName.Contains(_search, StringComparison.OrdinalIgnoreCase)) &&
+                    (_entityFilter is null || l.EntityName == _entityFilter));
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        _logs = await AuditSvc.GetRecentAsync(200);
+        _loading = false;
+    }
+}

@@ -1,0 +1,163 @@
+@page "/selling-prices"
+@attribute [Authorize(Policy = "RequireRequester")]
+@inject ISellingPriceService PriceSvc
+@inject IMasterDataService MasterSvc
+@inject ISnackbar Snackbar
+@inject AppStateService AppState
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Domain.Enums
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<PageTitle>Τιμές Πώλησης — Smart Pricing</PageTitle>
+
+<div class="sp-page-header">
+    <MudStack Row AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+        <div>
+            <MudText Typo="Typo.h4" Class="fw-700">Τιμές Πώλησης</MudText>
+            <div class="text-muted">Calculated Selling Prices & Margins</div>
+        </div>
+        <MudStack Row Spacing="2">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Calculate"
+                       OnClick="RecalcAll" Disabled="_recalculating">
+                @if (_recalculating) { <MudProgressCircular Size="Size.Small" Indeterminate Class="mr-2" /> }
+                Επανυπολογισμός / Recalculate All
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Calculate" OnClick="OpenCalcDialog">
+                Υπολογισμός / Calculate
+            </MudButton>
+        </MudStack>
+    </MudStack>
+</div>
+
+<!-- Summary chips -->
+<MudStack Row Spacing="2" Class="mb-4">
+    <MudChip T="string" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle">
+        🟢 Εντός Στόχου: @_prices.Count(p => p.ColorIndicator == ColorIndicator.Green)
+    </MudChip>
+    <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.Warning">
+        🟡 Οριακά: @_prices.Count(p => p.ColorIndicator == ColorIndicator.Orange)
+    </MudChip>
+    <MudChip T="string" Color="Color.Error" Icon="@Icons.Material.Filled.Error">
+        🔴 Κάτω Στόχου: @_prices.Count(p => p.ColorIndicator == ColorIndicator.Red)
+    </MudChip>
+</MudStack>
+
+<!-- Filter -->
+<div class="sp-card mb-4" style="padding:12px 20px">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="4">
+            <MudTextField @bind-Value="_search" Placeholder="Αναζήτηση / Search..."
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Immediate />
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudSelect @bind-Value="_channelFilter" Placeholder="Όλα τα κανάλια" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Clearable>
+                @foreach (var ch in _channels)
+                {
+                    <MudSelectItem Value="@((int?)ch.ChannelID)">@ch.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="3">
+            <MudSelect @bind-Value="_indicatorFilter" Placeholder="Όλοι οι δείκτες" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Clearable>
+                <MudSelectItem Value="@((ColorIndicator?)ColorIndicator.Green)">🟢 Εντός Στόχου</MudSelectItem>
+                <MudSelectItem Value="@((ColorIndicator?)ColorIndicator.Orange)">🟡 Οριακά</MudSelectItem>
+                <MudSelectItem Value="@((ColorIndicator?)ColorIndicator.Red)">🔴 Κάτω Στόχου</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
+</div>
+
+<!-- Table -->
+<div class="sp-card">
+    <MudTable Items="FilteredPrices" Hover Dense Elevation="0" Loading="_loading">
+        <HeaderContent>
+            <MudTh>Κωδικός / Code</MudTh>
+            <MudTh>Είδος / Item</MudTh>
+            <MudTh>Κανάλι / Channel</MudTh>
+            <MudTh Style="text-align:right">Κόστος / Cost</MudTh>
+            <MudTh Style="text-align:right">Τιμή Πώλησης</MudTh>
+            <MudTh Style="text-align:right">GM%</MudTh>
+            <MudTh Style="text-align:right">Markup%</MudTh>
+            <MudTh Style="text-align:center">Δείκτης</MudTh>
+            <MudTh Style="text-align:center">Στόχος GM%</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd Class="text-mono" Style="font-size:.8rem">@context.ERPItemCode</MudTd>
+            <MudTd>
+                <div style="font-weight:600">@context.ItemName</div>
+                <div class="text-muted" style="font-size:.72rem">@context.UoM</div>
+            </MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="Color.Default">@context.ChannelName</MudChip>
+            </MudTd>
+            <MudTd Style="text-align:right" Class="price-value">@context.Cost.ToString("N4")</MudTd>
+            <MudTd Style="text-align:right">
+                <strong class="price-value" style="color:#1A56DB">@context.SuggestedPrice.ToString("N2")</strong>
+            </MudTd>
+            <MudTd Style="text-align:right" Class="price-value">@context.GrossMarginPercent.ToString("F2")%</MudTd>
+            <MudTd Style="text-align:right" Class="price-value">@context.MarkupPercent.ToString("F2")%</MudTd>
+            <MudTd Style="text-align:center">
+                <ColorIndicatorBadge Indicator="@context.ColorIndicator" Value="@context.GrossMarginPercent" />
+            </MudTd>
+            <MudTd Style="text-align:center" Class="text-muted">
+                @(context.TargetMargin.HasValue ? $"{context.TargetMargin:F1}%" : "—")
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-6 text-muted" Style="text-align:center">
+                Δεν υπάρχουν υπολογισμένες τιμές. Εισάγετε τιμές προμηθευτών και πατήστε "Επανυπολογισμός".
+            </MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>
+
+@code {
+    private List<CalculatedPriceDto> _prices = [];
+    private List<Domain.Entities.Channel> _channels = [];
+    private string _search = "";
+    private int? _channelFilter;
+    private ColorIndicator? _indicatorFilter;
+    private bool _loading = true;
+    private bool _recalculating;
+
+    private IEnumerable<CalculatedPriceDto> FilteredPrices => _prices
+        .Where(p => (string.IsNullOrWhiteSpace(_search) ||
+                     p.ItemName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                     p.ERPItemCode.Contains(_search, StringComparison.OrdinalIgnoreCase)) &&
+                    (_channelFilter is null || p.ChannelID == _channelFilter) &&
+                    (_indicatorFilter is null || p.ColorIndicator == _indicatorFilter));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _channels = await MasterSvc.GetChannelsAsync();
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        _prices = await PriceSvc.GetAllAsync();
+        _loading = false;
+    }
+
+    private async Task RecalcAll()
+    {
+        _recalculating = true;
+        var results = await PriceSvc.RecalculateAllAsync(AppState.CurrentUserID);
+        Snackbar.Add($"Επανυπολογίστηκαν {results.Count} τιμές.", Severity.Success);
+        await LoadData();
+        _recalculating = false;
+    }
+
+    private void OpenCalcDialog()
+    {
+        // Navigate to calculate single dialog — simplified: just recalculate all
+        Snackbar.Add("Χρησιμοποιήστε 'Επανυπολογισμός' για ενημέρωση όλων των τιμών.", Severity.Info);
+    }
+}

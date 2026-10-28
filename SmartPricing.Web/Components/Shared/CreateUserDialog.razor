@@ -1,0 +1,80 @@
+@* CreateUserDialog.razor *@
+@inject IUserService UserSvc
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">👤 Νέος Χρήστης / New User</MudText></TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudTextField @bind-Value="_userName" Label="Username *" Variant="Variant.Outlined" Required AutoFocus />
+            <MudTextField @bind-Value="_displayName" Label="Εμφανιζόμενο Όνομα / Display Name *"
+                          Variant="Variant.Outlined" Required />
+            <MudTextField @bind-Value="_email" Label="Email" Variant="Variant.Outlined" InputType="InputType.Email" />
+            <MudTextField @bind-Value="_password" Label="Password *" Variant="Variant.Outlined"
+                          InputType="InputType.Password" Required />
+
+            <MudText Typo="Typo.subtitle2">Ρόλοι / Roles:</MudText>
+            @foreach (var role in _allRoles)
+            {
+                <MudCheckBox @bind-Value="role.Selected" Label="@role.Name" Color="Color.Primary" />
+            }
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense>@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Ακύρωση</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" Disabled="_saving">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate Class="mr-1" /> }
+            Δημιουργία / Create
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _userName = "", _displayName = "", _email = "", _password = "";
+    private string? _error;
+    private bool _saving;
+
+    private List<RoleCheck> _allRoles =
+    [
+        new("Requester"), new("Reviewer"), new("Approver"), new("Admin")
+    ];
+
+    private async Task Submit()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_userName) || string.IsNullOrWhiteSpace(_displayName) ||
+            string.IsNullOrWhiteSpace(_password))
+        {
+            _error = "Συμπληρώστε όλα τα υποχρεωτικά πεδία."; return;
+        }
+
+        var selectedRoles = _allRoles.Where(r => r.Selected).Select(r => r.Name).ToList();
+        if (!selectedRoles.Any()) { _error = "Επιλέξτε τουλάχιστον έναν ρόλο."; return; }
+
+        _saving = true;
+        try
+        {
+            await UserSvc.CreateAsync(new CreateUserDto(_userName, _displayName, _email, _password, selectedRoles));
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private class RoleCheck(string name)
+    {
+        public string Name { get; } = name;
+        public bool Selected { get; set; }
+    }
+}

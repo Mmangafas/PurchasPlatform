@@ -1,0 +1,25 @@
+@using Microsoft.AspNetCore.Components.Authorization
+
+<Router AppAssembly="typeof(App).Assembly">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                @if (!context.User.Identity?.IsAuthenticated ?? true)
+                {
+                    <RedirectToLogin />
+                }
+                else
+                {
+                    <MudBlazor.MudText Typo="MudBlazor.Typo.h5" Class="pa-8">
+                        ⛔ Access Denied / Δεν έχετε πρόσβαση
+                    </MudBlazor.MudText>
+                }
+            </NotAuthorized>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <PageTitle>Not Found</PageTitle>
+        <MudBlazor.MudText Typo="MudBlazor.Typo.h5" Class="pa-8">404 — Page not found.</MudBlazor.MudText>
+    </NotFound>
+</Router>

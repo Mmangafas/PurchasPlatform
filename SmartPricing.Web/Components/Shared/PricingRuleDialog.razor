@@ -1,0 +1,131 @@
+@inject IPricingRuleService RuleSvc
+@inject AppStateService AppState
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Web.Services
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            @(Rule is null ? "➕ Νέος Κανόνας Τιμολόγησης" : "✏️ Επεξεργασία Κανόνα")
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudAlert Severity="Severity.Info" Dense>
+                Οι κανόνες χωρίς κατηγορία/κανάλι εφαρμόζονται σε όλα / Rules without category/channel apply to all.
+            </MudAlert>
+
+            <MudSelect @bind-Value="_categoryID" Label="Κατηγορία / Category" Variant="Variant.Outlined" Clearable>
+                @foreach (var c in Categories)
+                {
+                    <MudSelectItem Value="@((int?)c.CategoryID)">@c.Name (@c.Code)</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect @bind-Value="_channelID" Label="Κανάλι / Channel" Variant="Variant.Outlined" Clearable>
+                @foreach (var ch in Channels)
+                {
+                    <MudSelectItem Value="@((int?)ch.ChannelID)">@ch.Name</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudDivider />
+            <MudText Typo="Typo.caption" Class="text-muted">
+                Ορίστε είτε Target GM% είτε Markup% (ή και τα δύο — προτεραιότητα στο GM%).
+            </MudText>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="6">
+                    <MudNumericField @bind-Value="_targetMargin" Label="Target Gross Margin %"
+                                     Variant="Variant.Outlined" Format="F2" Min="0" Max="99"
+                                     Adornment="Adornment.End" AdornmentText="%" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudNumericField @bind-Value="_markupPct" Label="Markup %"
+                                     Variant="Variant.Outlined" Format="F2" Min="0"
+                                     Adornment="Adornment.End" AdornmentText="%" />
+                </MudItem>
+            </MudGrid>
+
+            <MudSelect @bind-Value="_roundingRuleID" Label="Κανόνας Στρογγυλοποίησης / Rounding Rule"
+                       Variant="Variant.Outlined" Clearable>
+                @foreach (var r in RoundingRules)
+                {
+                    <MudSelectItem Value="@((int?)r.RoundingRuleID)">
+                        @r.RuleName — @r.Pattern (@r.Description)
+                    </MudSelectItem>
+                }
+            </MudSelect>
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense>@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Ακύρωση</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" Disabled="_saving">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate Class="mr-1" /> }
+            Αποθήκευση / Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public PricingRuleDto? Rule { get; set; }
+    [Parameter] public List<Domain.Entities.Category> Categories { get; set; } = [];
+    [Parameter] public List<Domain.Entities.Channel> Channels { get; set; } = [];
+    [Parameter] public List<Domain.Entities.RoundingRule> RoundingRules { get; set; } = [];
+
+    private int? _categoryID;
+    private int? _channelID;
+    private decimal? _targetMargin;
+    private decimal? _markupPct;
+    private int? _roundingRuleID;
+    private string? _error;
+    private bool _saving;
+
+    protected override void OnParametersSet()
+    {
+        if (Rule is not null)
+        {
+            _categoryID = Rule.CategoryID;
+            _channelID = Rule.ChannelID;
+            _targetMargin = Rule.TargetMarginPercent;
+            _markupPct = Rule.MarkupPercent;
+            _roundingRuleID = Rule.RoundingRuleID;
+        }
+    }
+
+    private async Task Submit()
+    {
+        _error = null;
+        if (_targetMargin is null && _markupPct is null)
+        {
+            _error = "Ορίστε τουλάχιστον Target GM% ή Markup%.";
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var dto = new CreatePricingRuleDto(_categoryID, _channelID, _targetMargin, _markupPct,
+                _roundingRuleID, AppState.CurrentUserID);
+
+            if (Rule is null)
+                await RuleSvc.CreateAsync(dto);
+            else
+                await RuleSvc.UpdateAsync(Rule.RuleID, dto);
+
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}
