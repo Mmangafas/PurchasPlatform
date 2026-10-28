@@ -41,17 +41,16 @@ For SQL Server Express:
 Server=.\\SQLEXPRESS;Database=SmartPricingDb;Trusted_Connection=True;
 ```
 
-### 3. Apply database migrations
+### 3. Database migrations
+
+Migrations live in `SmartPricing.Infrastructure/Migrations` and are applied automatically on startup.
+A database created by an older version (with `EnsureCreated`) is detected and upgraded in place.
+
+To add a migration after changing the model:
 
 ```bash
-# From the solution root:
-dotnet ef migrations add InitialCreate \
-  --project SmartPricing.Infrastructure \
-  --startup-project SmartPricing.Web
-
-dotnet ef database update \
-  --project SmartPricing.Infrastructure \
-  --startup-project SmartPricing.Web
+dotnet tool restore
+dotnet ef migrations add <Name> --project SmartPricing.Infrastructure --startup-project SmartPricing.Web
 ```
 
 ### 4. Run the application
@@ -220,9 +219,10 @@ The architecture is designed for new modules — add new entities to the Domain,
 
 ## 📝 Notes
 
-- The app auto-runs `database.MigrateAsync()` on startup — no manual migration needed after the initial `ef migrations add`.
+- The app runs `MigrateAsync()` on startup; it never deletes an existing database.
 - The **ERP Sync** page allows pasting raw JSON payloads for testing without a live ERP system.
-- Default admin password should be changed after first login in production.
+- The default admin must choose a new password at first login. Accounts lock for 15 minutes after 5 failed logins.
+- A SQL password saved from **Settings** is stored encrypted (ASP.NET Data Protection, keys in `%LOCALAPPDATA%\SmartPricing\keys`).
 
 ---
 

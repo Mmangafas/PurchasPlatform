@@ -77,6 +77,7 @@
                 <MudItem xs="12" md="6">
                     <MudTextField T="string" @bind-Value="_s.Password"
                                   Label="Password"
+                                  HelperText="Leave blank to keep the current password. Stored encrypted."
                                   Variant="Variant.Outlined"
                                   InputType="@(_showPwd ? InputType.Text : InputType.Password)"
                                   Adornment="Adornment.End"
@@ -113,7 +114,7 @@
             <MudItem xs="12">
                 <MudText Typo="Typo.subtitle2" Class="mb-1">Connection String Preview</MudText>
                 <div style="background:var(--mud-palette-background-grey);border-radius:6px;padding:10px 14px;font-family:monospace;font-size:.8rem;word-break:break-all;color:var(--mud-palette-text-secondary)">
-                    @DbSettings.BuildConnectionString(_s)
+                    @DbSettings.BuildPreview(_s)
                 </div>
             </MudItem>
 

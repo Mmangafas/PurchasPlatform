@@ -194,6 +194,7 @@ public record MarginAlertDto(string ItemName, string ChannelName, decimal Margin
 
 public record LoginDto(string UserName, string Password);
 public record UserDto(int UserID, string UserName, string DisplayName, string? Email, List<string> Roles);
+public record AuthResultDto(UserDto? User, bool IsLockedOut, bool MustChangePassword);
 public record CreateUserDto(string UserName, string DisplayName, string? Email, string Password, List<string> Roles);
 
 // ── Audit Log ─────────────────────────────────────────────────────────────────

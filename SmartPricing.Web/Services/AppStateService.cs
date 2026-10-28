@@ -1,16 +1,41 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Components.Authorization;
 using SmartPricing.Application.DTOs;
+using SmartPricing.Application.Interfaces;
 
 namespace SmartPricing.Web.Services;
 
 /// <summary>
-/// Scoped service that holds the current authenticated user
-/// throughout a Blazor Server circuit.
+/// Scoped service exposing the current authenticated user.
+/// The user is read from the auth cookie's claims, so it is available in
+/// every Blazor circuit and survives reconnects and page reloads.
 /// </summary>
-public class AppStateService
+public class AppStateService : ICurrentUser, IDisposable
 {
-    public UserDto? CurrentUser { get; private set; }
+    private readonly AuthenticationStateProvider _authProvider;
+    private ClaimsPrincipal? _principal;
+    private UserDto? _user;
+
+    public AppStateService(AuthenticationStateProvider authProvider)
+    {
+        _authProvider = authProvider;
+        _authProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+    }
+
+    public UserDto? CurrentUser
+    {
+        get
+        {
+            var principal = GetPrincipal();
+            if (principal is null || principal.Identity?.IsAuthenticated != true) return null;
+            return _user ??= FromClaims(principal);
+        }
+    }
+
     public int CurrentUserID => CurrentUser?.UserID ?? 0;
     public bool IsAuthenticated => CurrentUser is not null;
+
+    int ICurrentUser.UserID => CurrentUserID;
 
     public bool IsInRole(string role) =>
         CurrentUser?.Roles.Contains(role, StringComparer.OrdinalIgnoreCase) ?? false;
@@ -21,15 +46,46 @@ public class AppStateService
 
     public event Action? OnChange;
 
-    public void SetUser(UserDto? user)
+    public void Clear()
     {
-        CurrentUser = user;
+        _principal = new ClaimsPrincipal(new ClaimsIdentity());
+        _user = null;
         OnChange?.Invoke();
     }
 
-    public void Clear()
+    private ClaimsPrincipal? GetPrincipal()
     {
-        CurrentUser = null;
+        if (_principal is not null) return _principal;
+        try
+        {
+            // The server provider's state is already resolved for both HTTP requests and circuits.
+            var task = _authProvider.GetAuthenticationStateAsync();
+            if (task.IsCompletedSuccessfully) _principal = task.Result.User;
+        }
+        catch (InvalidOperationException)
+        {
+            // No authentication state in this scope (e.g. a minimal API endpoint).
+        }
+        return _principal;
+    }
+
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
+    {
+        var state = await task;
+        _principal = state.User;
+        _user = null;
         OnChange?.Invoke();
     }
+
+    private static UserDto? FromClaims(ClaimsPrincipal p)
+    {
+        if (!int.TryParse(p.FindFirstValue(ClaimTypes.NameIdentifier), out var id)) return null;
+        var name = p.FindFirstValue(ClaimTypes.Name) ?? "";
+        return new UserDto(id, name,
+            p.FindFirstValue("DisplayName") ?? name,
+            p.FindFirstValue(ClaimTypes.Email),
+            p.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList());
+    }
+
+    public void Dispose() => _authProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
 }

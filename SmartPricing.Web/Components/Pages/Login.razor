@@ -1,5 +1,6 @@
 @page "/login"
 @layout EmptyLayout
+@attribute [ExcludeFromInteractiveRouting]
 @using MudBlazor
 
 <PageTitle>Login — Smart Pricing Control</PageTitle>
@@ -16,11 +17,13 @@
             <AntiforgeryToken />
 
             <MudStack Spacing="3">
-                <MudTextField T="string" Name="username" Label="Username / Χρήστης"
+                <MudTextField T="string" UserAttributes="@(new() { ["name"] = "username", ["autocomplete"] = "username" })"
+                              Label="Username / Χρήστης"
                               Variant="Variant.Outlined" Adornment="Adornment.Start"
                               AdornmentIcon="@Icons.Material.Filled.Person" />
 
-                <MudTextField T="string" Name="password" Label="Password / Κωδικός"
+                <MudTextField T="string" UserAttributes="@(new() { ["name"] = "password", ["autocomplete"] = "current-password" })"
+                              Label="Password / Κωδικός"
                               Variant="Variant.Outlined"
                               InputType="InputType.Password"
                               Adornment="Adornment.End"
@@ -38,14 +41,10 @@
                 </MudButton>
             </MudStack>
         </form>
-
-        <div class="text-muted mt-4" style="font-size:.75rem;text-align:center">
-            Default: admin / Admin@123
-        </div>
     </div>
 </div>
 
 @code {
-    [Parameter][SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
-    [Parameter][SupplyParameterFromQuery] public string? Error { get; set; }
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery] public string? Error { get; set; }
 }

@@ -126,8 +126,12 @@
         var ok = await Dialog.ShowMessageBox("Απενεργοποίηση", "Απενεργοποίηση χρήστη;", "Ναι", "Όχι");
         if (ok == true)
         {
-            await UserSvc.DeactivateAsync(userID);
-            Snackbar.Add("Χρήστης απενεργοποιήθηκε.", Severity.Warning);
+            try
+            {
+                await UserSvc.DeactivateAsync(userID);
+                Snackbar.Add("Χρήστης απενεργοποιήθηκε.", Severity.Warning);
+            }
+            catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Error); }
             await LoadData();
         }
     }

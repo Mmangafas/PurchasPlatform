@@ -152,7 +152,8 @@ public class SmartPricingDbContext : DbContext
                 UserName = "admin",
                 DisplayName = "Administrator",
                 Email = "admin@smartpricing.local",
-                PasswordHash = "$2a$11$K5DSFLEWBfB3rOZoizqJuuHk1HHxGh4GH2YFMoaqkCuF.MxhZLqrS", // BCrypt hash of Admin@123
+                MustChangePassword = true,
+                PasswordHash = "$2a$11$K5DSFLEWBfB3rOZoizqJuuHk1HHxGh4GH2YFMoaqkCuF.MxhZLqrS", // Invalid legacy hash; migration AddLoginSecurity replaces it with Admin@123
                 IsActive = true
             }
         );

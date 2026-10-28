@@ -9,7 +9,8 @@
     <ProjectReference Include="..\SmartPricing.Infrastructure\SmartPricing.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0-preview.4.25258.110" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14" PrivateAssets="all" />
     <PackageReference Include="MudBlazor" Version="8.4.0" />
   </ItemGroup>
 </Project>

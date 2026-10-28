@@ -7,6 +7,7 @@
 @using MudBlazor
 
 <MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
 <MudSnackbarProvider />
 <MudDialogProvider />
 
@@ -30,6 +31,8 @@
             <MudChip T="string" Color="Color.Primary" Size="Size.Small" Class="mr-4">
                 @string.Join(", ", AppState.CurrentUser.Roles)
             </MudChip>
+            <MudIconButton Icon="@Icons.Material.Filled.Key" Color="Color.Inherit"
+                           Href="/account/change-password" title="Change password / Αλλαγή κωδικού" />
             <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit"
                            OnClick="Logout" title="Logout / Αποσύνδεση" />
         }
@@ -113,15 +116,6 @@
             Background = "#F1F5F9",
         }
     };
-
-    protected override async Task OnInitializedAsync()
-    {
-        // Reload user state from auth context if lost after circuit reconnect
-        if (AppState.CurrentUser is null)
-        {
-            // User will be set by Login page; here we just check
-        }
-    }
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
 

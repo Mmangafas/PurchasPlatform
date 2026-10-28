@@ -8,6 +8,22 @@ using SmartPricing.Infrastructure.Data;
 
 namespace SmartPricing.Infrastructure.Services;
 
+// ── Authorization guard ───────────────────────────────────────────────────────
+// Mirrors the policies in Program.cs so services stay safe even if a UI check is missed.
+
+internal static class Roles
+{
+    public static readonly string[] Requester = ["Requester", "Reviewer", "Approver", "Admin"];
+    public static readonly string[] Approver = ["Approver", "Admin"];
+    public static readonly string[] Admin = ["Admin"];
+
+    public static void Require(this ICurrentUser user, string[] roles)
+    {
+        if (!user.IsAuthenticated || !roles.Any(user.IsInRole))
+            throw new UnauthorizedAccessException("Δεν έχετε δικαίωμα για αυτή την ενέργεια / Not authorized.");
+    }
+}
+
 // ── Master Data ───────────────────────────────────────────────────────────────
 
 public class MasterDataService : IMasterDataService
@@ -37,7 +53,8 @@ public class SupplierPriceService : ISupplierPriceService
 {
     private readonly SmartPricingDbContext _db;
     private readonly IAuditService _audit;
-    public SupplierPriceService(SmartPricingDbContext db, IAuditService audit) { _db = db; _audit = audit; }
+    private readonly ICurrentUser _user;
+    public SupplierPriceService(SmartPricingDbContext db, IAuditService audit, ICurrentUser user) { _db = db; _audit = audit; _user = user; }
 
     private IQueryable<SupplierPriceList> BaseQuery() =>
         _db.SupplierPriceLists
@@ -76,6 +93,7 @@ public class SupplierPriceService : ISupplierPriceService
 
     public async Task<int> CreateAsync(CreateSupplierPriceDto dto)
     {
+        _user.Require(Roles.Requester);
         var entity = new SupplierPriceList
         {
             SupplierID = dto.SupplierID, ItemID = dto.ItemID,
@@ -91,8 +109,13 @@ public class SupplierPriceService : ISupplierPriceService
 
     public async Task DeleteAsync(int supplierPriceID)
     {
+        _user.Require(Roles.Requester);
         var entity = await _db.SupplierPriceLists.FindAsync(supplierPriceID);
-        if (entity is not null) { _db.SupplierPriceLists.Remove(entity); await _db.SaveChangesAsync(); }
+        if (entity is null) return;
+        _db.SupplierPriceLists.Remove(entity);
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(_user.UserID, "Delete", "SupplierPriceList", supplierPriceID,
+            $"{entity.SupplierID}/{entity.ItemID} {entity.BasePrice}+{entity.ExtraCharges}");
     }
 }
 
@@ -102,7 +125,8 @@ public class SellingPriceService : ISellingPriceService
 {
     private readonly SmartPricingDbContext _db;
     private readonly IAuditService _audit;
-    public SellingPriceService(SmartPricingDbContext db, IAuditService audit) { _db = db; _audit = audit; }
+    private readonly ICurrentUser _user;
+    public SellingPriceService(SmartPricingDbContext db, IAuditService audit, ICurrentUser user) { _db = db; _audit = audit; _user = user; }
 
     public async Task<List<CalculatedPriceDto>> GetAllAsync()
     {
@@ -121,6 +145,7 @@ public class SellingPriceService : ISellingPriceService
 
     public async Task<CalculatedPriceDto?> CalculateAsync(CalculatePriceRequest request)
     {
+        _user.Require(Roles.Requester);
         var item = await _db.Items.Include(i => i.Category).FirstOrDefaultAsync(i => i.ItemID == request.ItemID);
         var channel = await _db.Channels.FindAsync(request.ChannelID);
         if (item is null || channel is null) return null;
@@ -180,6 +205,7 @@ public class SellingPriceService : ISellingPriceService
 
     public async Task<List<CalculatedPriceDto>> RecalculateAllAsync(int createdBy)
     {
+        _user.Require(Roles.Requester);
         var today = DateOnly.FromDateTime(DateTime.Today);
         var items = await _db.Items.Where(i => i.IsActive).ToListAsync();
         var channels = await _db.Channels.ToListAsync();
@@ -209,7 +235,8 @@ public class BatchService : IBatchService
 {
     private readonly SmartPricingDbContext _db;
     private readonly IAuditService _audit;
-    public BatchService(SmartPricingDbContext db, IAuditService audit) { _db = db; _audit = audit; }
+    private readonly ICurrentUser _user;
+    public BatchService(SmartPricingDbContext db, IAuditService audit, ICurrentUser user) { _db = db; _audit = audit; _user = user; }
 
     private static BatchSummaryDto MapSummary(PriceBatch b) => new(
         b.BatchID, b.BatchName, b.Status, b.Creator?.DisplayName ?? "",
@@ -233,12 +260,35 @@ public class BatchService : IBatchService
             .Include(b => b.Lines).ThenInclude(l => l.Item)
             .Include(b => b.Lines).ThenInclude(l => l.Channel);
 
+    // Draft and Rejected batches can be edited and (re)submitted.
+    private static bool IsEditable(BatchStatus status) => status is BatchStatus.Draft or BatchStatus.Rejected;
+
+    private async Task<PriceBatch> GetEditableBatchAsync(int batchID)
+    {
+        var batch = await _db.PriceBatches.FindAsync(batchID) ?? throw new InvalidOperationException("Batch not found");
+        if (!IsEditable(batch.Status))
+            throw new InvalidOperationException("Το batch δεν είναι επεξεργάσιμο / Batch can only be edited while Draft or Rejected.");
+        return batch;
+    }
+
+    private async Task<List<PriceBatchLine>> GetPendingLinesOfSubmittedBatchesAsync(IEnumerable<int> lineIDs)
+    {
+        var ids = lineIDs.ToList();
+        var lines = await _db.PriceBatchLines.Include(l => l.Batch).Where(l => ids.Contains(l.LineID)).ToListAsync();
+        if (lines.Any(l => l.Batch!.Status != BatchStatus.Submitted))
+            throw new InvalidOperationException("Μόνο γραμμές υποβεβλημένων batches / Only lines of submitted batches can be approved or rejected.");
+        return lines.Where(l => l.LineStatus == LineStatus.Pending).ToList();
+    }
+
     public async Task<List<BatchSummaryDto>> GetAllAsync() =>
         (await BaseQuery().OrderByDescending(b => b.CreatedAt).ToListAsync()).Select(MapSummary).ToList();
 
-    public async Task<List<BatchSummaryDto>> GetByStatusAsync(string status) =>
-        (await BaseQuery().Where(b => b.Status.ToString() == status)
+    public async Task<List<BatchSummaryDto>> GetByStatusAsync(string status)
+    {
+        if (!Enum.TryParse<BatchStatus>(status, true, out var parsed)) return [];
+        return (await BaseQuery().Where(b => b.Status == parsed)
             .OrderByDescending(b => b.CreatedAt).ToListAsync()).Select(MapSummary).ToList();
+    }
 
     public async Task<BatchDetailDto?> GetByIdAsync(int batchID)
     {
@@ -248,15 +298,23 @@ public class BatchService : IBatchService
 
     public async Task<int> CreateAsync(CreateBatchDto dto)
     {
-        var batch = new PriceBatch { BatchName = dto.BatchName, CreatedBy = dto.CreatedBy };
+        _user.Require(Roles.Requester);
+        var batch = new PriceBatch { BatchName = dto.BatchName, CreatedBy = _user.UserID };
         _db.PriceBatches.Add(batch);
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(dto.CreatedBy, "CreateBatch", "PriceBatch", batch.BatchID, null, dto.BatchName);
+        await _audit.LogAsync(_user.UserID, "CreateBatch", "PriceBatch", batch.BatchID, null, dto.BatchName);
         return batch.BatchID;
     }
 
     public async Task AddLineAsync(AddBatchLineDto dto)
     {
+        _user.Require(Roles.Requester);
+        if (dto.NewPrice <= 0) throw new ArgumentException("Η νέα τιμή πρέπει να είναι > 0 / New price must be greater than 0.");
+        await GetEditableBatchAsync(dto.BatchID);
+
+        if (await _db.PriceBatchLines.AnyAsync(l => l.BatchID == dto.BatchID && l.ItemID == dto.ItemID && l.ChannelID == dto.ChannelID))
+            throw new InvalidOperationException("Το είδος υπάρχει ήδη για αυτό το κανάλι / This item is already in the batch for this channel.");
+
         var today = DateOnly.FromDateTime(DateTime.Today);
         // Get old price from history
         var oldPrice = await _db.PriceChangeHistories
@@ -266,13 +324,13 @@ public class BatchService : IBatchService
         var line = new PriceBatchLine
         {
             BatchID = dto.BatchID, ItemID = dto.ItemID, ChannelID = dto.ChannelID,
-            OldPrice = oldPrice, NewPrice = dto.NewPrice, CreatedBy = dto.CreatedBy
+            OldPrice = oldPrice, NewPrice = dto.NewPrice, CreatedBy = _user.UserID
         };
 
-        // Calculate margin if we have supplier cost
+        // Calculate margin if we have supplier cost (TotalCost is not mapped, so compute it in SQL)
         var cost = await _db.SupplierPriceLists
             .Where(s => s.ItemID == dto.ItemID && s.ValidFrom <= today && (s.ValidTo == null || s.ValidTo >= today))
-            .OrderByDescending(s => s.ValidFrom).Select(s => (decimal?)s.TotalCost).FirstOrDefaultAsync();
+            .OrderByDescending(s => s.ValidFrom).Select(s => (decimal?)(s.BasePrice + s.ExtraCharges)).FirstOrDefaultAsync();
         if (cost.HasValue)
             line.MarginPercent = PricingCalculator.GrossMargin(dto.NewPrice, cost.Value);
 
@@ -282,30 +340,49 @@ public class BatchService : IBatchService
 
     public async Task RemoveLineAsync(int lineID)
     {
+        _user.Require(Roles.Requester);
         var line = await _db.PriceBatchLines.FindAsync(lineID);
-        if (line is not null) { _db.PriceBatchLines.Remove(line); await _db.SaveChangesAsync(); }
+        if (line is null) return;
+        await GetEditableBatchAsync(line.BatchID);
+        _db.PriceBatchLines.Remove(line);
+        await _db.SaveChangesAsync();
     }
 
     public async Task SubmitAsync(int batchID, int userID)
     {
-        var batch = await _db.PriceBatches.FindAsync(batchID) ?? throw new InvalidOperationException("Batch not found");
+        _user.Require(Roles.Requester);
+        var batch = await GetEditableBatchAsync(batchID);
+        var lines = await _db.PriceBatchLines.Where(l => l.BatchID == batchID).ToListAsync();
+        if (lines.Count == 0)
+            throw new InvalidOperationException("Το batch δεν έχει γραμμές / Batch has no lines.");
+
+        // On resubmission every line goes back for review
+        foreach (var line in lines) { line.LineStatus = LineStatus.Pending; line.ApproverComment = null; }
+
         batch.Status = BatchStatus.Submitted;
-        batch.SubmittedBy = userID;
+        batch.SubmittedBy = _user.UserID;
         batch.SubmittedAt = DateTime.UtcNow;
+        batch.ApprovedBy = null;
+        batch.ApprovedAt = null;
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(userID, "SubmitBatch", "PriceBatch", batchID);
+        await _audit.LogAsync(_user.UserID, "SubmitBatch", "PriceBatch", batchID);
     }
 
     public async Task ApproveBatchAsync(int batchID, int approverID)
     {
+        _user.Require(Roles.Approver);
         var batch = await _db.PriceBatches.Include(b => b.Lines).FirstOrDefaultAsync(b => b.BatchID == batchID)
             ?? throw new InvalidOperationException("Batch not found");
 
+        if (batch.Status != BatchStatus.Submitted)
+            throw new InvalidOperationException("Μόνο υποβεβλημένα batches εγκρίνονται / Only submitted batches can be approved.");
+        if (batch.Lines.Count == 0)
+            throw new InvalidOperationException("Το batch δεν έχει γραμμές / Batch has no lines.");
         if (batch.Lines.Any(l => l.LineStatus != LineStatus.Approved))
             throw new InvalidOperationException("Not all lines approved");
 
         batch.Status = BatchStatus.Approved;
-        batch.ApprovedBy = approverID;
+        batch.ApprovedBy = _user.UserID;
         batch.ApprovedAt = DateTime.UtcNow;
 
         // Write price change history
@@ -316,34 +393,48 @@ public class BatchService : IBatchService
                 ItemID = line.ItemID, ChannelID = line.ChannelID,
                 OldPrice = line.OldPrice, NewPrice = line.NewPrice,
                 ChangePercent = PricingCalculator.ChangePercent(line.OldPrice, line.NewPrice),
-                ChangedBy = approverID
+                ChangedBy = _user.UserID
             });
         }
 
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(approverID, "ApproveBatch", "PriceBatch", batchID);
+        await _audit.LogAsync(_user.UserID, "ApproveBatch", "PriceBatch", batchID);
+    }
+
+    public async Task RejectBatchAsync(int batchID, int approverID)
+    {
+        _user.Require(Roles.Approver);
+        var batch = await _db.PriceBatches.FindAsync(batchID) ?? throw new InvalidOperationException("Batch not found");
+        if (batch.Status != BatchStatus.Submitted)
+            throw new InvalidOperationException("Μόνο υποβεβλημένα batches απορρίπτονται / Only submitted batches can be rejected.");
+
+        batch.Status = BatchStatus.Rejected;
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(_user.UserID, "RejectBatch", "PriceBatch", batchID);
     }
 
     public async Task ApproveLinesAsync(List<ApproveBatchLineDto> lines)
     {
-        foreach (var dto in lines)
+        _user.Require(Roles.Approver);
+        var comments = lines.ToDictionary(l => l.LineID, l => l.Comment);
+        foreach (var line in await GetPendingLinesOfSubmittedBatchesAsync(comments.Keys))
         {
-            var line = await _db.PriceBatchLines.FindAsync(dto.LineID);
-            if (line is null) continue;
             line.LineStatus = LineStatus.Approved;
-            line.ApproverComment = dto.Comment;
+            line.ApproverComment = comments[line.LineID];
+            await _audit.LogAsync(_user.UserID, "ApproveLine", "PriceBatchLine", line.LineID, null, line.NewPrice.ToString());
         }
         await _db.SaveChangesAsync();
     }
 
     public async Task RejectLinesAsync(List<RejectBatchLineDto> lines)
     {
-        foreach (var dto in lines)
+        _user.Require(Roles.Approver);
+        var comments = lines.ToDictionary(l => l.LineID, l => l.Comment);
+        foreach (var line in await GetPendingLinesOfSubmittedBatchesAsync(comments.Keys))
         {
-            var line = await _db.PriceBatchLines.FindAsync(dto.LineID);
-            if (line is null) continue;
             line.LineStatus = LineStatus.Rejected;
-            line.ApproverComment = dto.Comment;
+            line.ApproverComment = comments[line.LineID];
+            await _audit.LogAsync(_user.UserID, "RejectLine", "PriceBatchLine", line.LineID, null, line.NewPrice.ToString());
         }
         await _db.SaveChangesAsync();
     }
@@ -354,7 +445,9 @@ public class BatchService : IBatchService
 public class PricingRuleService : IPricingRuleService
 {
     private readonly SmartPricingDbContext _db;
-    public PricingRuleService(SmartPricingDbContext db) => _db = db;
+    private readonly IAuditService _audit;
+    private readonly ICurrentUser _user;
+    public PricingRuleService(SmartPricingDbContext db, IAuditService audit, ICurrentUser user) { _db = db; _audit = audit; _user = user; }
 
     private IQueryable<PricingRule> BaseQuery() =>
         _db.PricingRules.Include(r => r.Category).Include(r => r.Channel).Include(r => r.RoundingRule);
@@ -377,6 +470,7 @@ public class PricingRuleService : IPricingRuleService
 
     public async Task<int> CreateAsync(CreatePricingRuleDto dto)
     {
+        _user.Require(Roles.Approver);
         var rule = new PricingRule
         {
             CategoryID = dto.CategoryID, ChannelID = dto.ChannelID,
@@ -385,23 +479,34 @@ public class PricingRuleService : IPricingRuleService
         };
         _db.PricingRules.Add(rule);
         await _db.SaveChangesAsync();
+        await _audit.LogAsync(_user.UserID, "Create", "PricingRule", rule.RuleID, null, Describe(rule));
         return rule.RuleID;
     }
 
     public async Task UpdateAsync(int ruleID, CreatePricingRuleDto dto)
     {
+        _user.Require(Roles.Approver);
         var rule = await _db.PricingRules.FindAsync(ruleID) ?? throw new InvalidOperationException("Rule not found");
+        var before = Describe(rule);
         rule.CategoryID = dto.CategoryID; rule.ChannelID = dto.ChannelID;
         rule.TargetMarginPercent = dto.TargetMarginPercent; rule.MarkupPercent = dto.MarkupPercent;
         rule.RoundingRuleID = dto.RoundingRuleID;
         await _db.SaveChangesAsync();
+        await _audit.LogAsync(_user.UserID, "Update", "PricingRule", ruleID, before, Describe(rule));
     }
 
     public async Task DeleteAsync(int ruleID)
     {
+        _user.Require(Roles.Approver);
         var rule = await _db.PricingRules.FindAsync(ruleID);
-        if (rule is not null) { _db.PricingRules.Remove(rule); await _db.SaveChangesAsync(); }
+        if (rule is null) return;
+        _db.PricingRules.Remove(rule);
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(_user.UserID, "Delete", "PricingRule", ruleID, Describe(rule));
     }
+
+    private static string Describe(PricingRule r) =>
+        $"Cat={r.CategoryID?.ToString() ?? "*"} Ch={r.ChannelID?.ToString() ?? "*"} GM={r.TargetMarginPercent} MU={r.MarkupPercent} Round={r.RoundingRuleID}";
 }
 
 // ── ERP Integration ───────────────────────────────────────────────────────────
@@ -410,10 +515,12 @@ public class ErpIntegrationService : IErpIntegrationService
 {
     private readonly SmartPricingDbContext _db;
     private readonly IAuditService _audit;
-    public ErpIntegrationService(SmartPricingDbContext db, IAuditService audit) { _db = db; _audit = audit; }
+    private readonly ICurrentUser _user;
+    public ErpIntegrationService(SmartPricingDbContext db, IAuditService audit, ICurrentUser user) { _db = db; _audit = audit; _user = user; }
 
     public async Task<SyncResultDto> ImportItemsAsync(List<ErpItemDto> items)
     {
+        _user.Require(Roles.Admin);
         int count = 0;
         foreach (var dto in items)
         {
@@ -440,6 +547,7 @@ public class ErpIntegrationService : IErpIntegrationService
 
     public async Task<SyncResultDto> ImportSuppliersAsync(List<ErpSupplierDto> suppliers)
     {
+        _user.Require(Roles.Admin);
         int count = 0;
         foreach (var dto in suppliers)
         {
@@ -455,6 +563,7 @@ public class ErpIntegrationService : IErpIntegrationService
 
     public async Task<SyncResultDto> ImportPurchasePricesAsync(List<ErpPurchasePriceDto> prices)
     {
+        _user.Require(Roles.Admin);
         int count = 0;
         foreach (var dto in prices)
         {
@@ -477,6 +586,7 @@ public class ErpIntegrationService : IErpIntegrationService
 
     public async Task<List<ErpSellingPriceExportDto>> ExportApprovedSellingPricesAsync()
     {
+        _user.Require(Roles.Admin);
         var lines = await _db.PriceBatchLines
             .Include(l => l.Item).Include(l => l.Channel).Include(l => l.Batch)
             .Where(l => l.LineStatus == LineStatus.Approved && l.Batch!.Status == BatchStatus.Approved)
@@ -532,19 +642,55 @@ public class DashboardService : IDashboardService
 
 public class UserService : IUserService
 {
+    private const int MaxFailedLogins = 5;
+    private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+
     private readonly SmartPricingDbContext _db;
-    public UserService(SmartPricingDbContext db) => _db = db;
+    private readonly IAuditService _audit;
+    private readonly ICurrentUser _user;
+    public UserService(SmartPricingDbContext db, IAuditService audit, ICurrentUser user) { _db = db; _audit = audit; _user = user; }
 
     private static UserDto Map(User u) => new(u.UserID, u.UserName, u.DisplayName, u.Email,
         u.UserRoles.Select(ur => ur.Role!.RoleName).ToList());
 
     private IQueryable<User> BaseQuery() => _db.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role);
 
-    public async Task<UserDto?> AuthenticateAsync(LoginDto dto)
+    public async Task<AuthResultDto> AuthenticateAsync(LoginDto dto)
     {
         var user = await BaseQuery().FirstOrDefaultAsync(u => u.UserName == dto.UserName && u.IsActive);
-        if (user is null || !BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash)) return null;
-        return Map(user);
+        if (user is null) return new AuthResultDto(null, false, false);
+
+        if (user.LockoutEnd > DateTime.UtcNow) return new AuthResultDto(null, true, false);
+
+        if (!BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash))
+        {
+            user.FailedLoginCount++;
+            if (user.FailedLoginCount >= MaxFailedLogins)
+            {
+                user.LockoutEnd = DateTime.UtcNow.Add(LockoutDuration);
+                user.FailedLoginCount = 0;
+            }
+            await _db.SaveChangesAsync();
+            await _audit.LogAsync(user.UserID, "LoginFailed", "User", user.UserID);
+            return new AuthResultDto(null, user.LockoutEnd > DateTime.UtcNow, false);
+        }
+
+        user.FailedLoginCount = 0;
+        user.LockoutEnd = null;
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(user.UserID, "Login", "User", user.UserID);
+        return new AuthResultDto(Map(user), false, user.MustChangePassword);
+    }
+
+    public async Task<bool> ChangePasswordAsync(int userID, string currentPassword, string newPassword)
+    {
+        var user = await _db.Users.FindAsync(userID);
+        if (user is null || !user.IsActive || !BCrypt.Net.BCrypt.Verify(currentPassword, user.PasswordHash)) return false;
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
+        user.MustChangePassword = false;
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(userID, "ChangePassword", "User", userID);
+        return true;
     }
 
     public async Task<UserDto?> GetByIdAsync(int userID)
@@ -558,19 +704,23 @@ public class UserService : IUserService
 
     public async Task<int> CreateAsync(CreateUserDto dto)
     {
+        _user.Require(Roles.Admin);
         var user = new User
         {
             UserName = dto.UserName, DisplayName = dto.DisplayName, Email = dto.Email,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password)
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
+            MustChangePassword = true
         };
         _db.Users.Add(user);
         await _db.SaveChangesAsync();
+        await _audit.LogAsync(_user.UserID, "CreateUser", "User", user.UserID, null, dto.UserName);
         await UpdateRolesAsync(user.UserID, dto.Roles);
         return user.UserID;
     }
 
     public async Task UpdateRolesAsync(int userID, List<string> roles)
     {
+        _user.Require(Roles.Admin);
         var existing = _db.UserRoles.Where(ur => ur.UserID == userID);
         _db.UserRoles.RemoveRange(existing);
         foreach (var roleName in roles)
@@ -579,12 +729,19 @@ public class UserService : IUserService
             if (role is not null) _db.UserRoles.Add(new UserRole { UserID = userID, RoleID = role.RoleID });
         }
         await _db.SaveChangesAsync();
+        await _audit.LogAsync(_user.UserID, "UpdateRoles", "User", userID, null, string.Join(",", roles));
     }
 
     public async Task DeactivateAsync(int userID)
     {
+        _user.Require(Roles.Admin);
+        if (userID == _user.UserID)
+            throw new InvalidOperationException("Δεν μπορείτε να απενεργοποιήσετε τον εαυτό σας / You cannot deactivate yourself.");
         var user = await _db.Users.FindAsync(userID);
-        if (user is not null) { user.IsActive = false; await _db.SaveChangesAsync(); }
+        if (user is null) return;
+        user.IsActive = false;
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(_user.UserID, "DeactivateUser", "User", userID);
     }
 }
 

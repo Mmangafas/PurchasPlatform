@@ -130,8 +130,12 @@
         var ok = await Dialog.ShowMessageBox("Υποβολή / Submit", "Υποβάλετε το batch για έγκριση;", "Ναι", "Όχι");
         if (ok == true)
         {
-            await BatchSvc.SubmitAsync(batchID, AppState.CurrentUserID);
-            Snackbar.Add("Το batch υποβλήθηκε για έγκριση.", Severity.Success);
+            try
+            {
+                await BatchSvc.SubmitAsync(batchID, AppState.CurrentUserID);
+                Snackbar.Add("Το batch υποβλήθηκε για έγκριση.", Severity.Success);
+            }
+            catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Error); }
             await LoadData();
         }
     }

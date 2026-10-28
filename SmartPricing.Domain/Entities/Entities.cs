@@ -182,6 +182,9 @@ public class User
     public string? Email { get; set; }
     public string PasswordHash { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
+    public int FailedLoginCount { get; set; }
+    public DateTime? LockoutEnd { get; set; }
+    public bool MustChangePassword { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = [];
 }

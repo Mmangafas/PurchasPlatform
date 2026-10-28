@@ -31,7 +31,7 @@ else if (_batch is not null)
                 </div>
             </div>
             <MudStack Row Spacing="2">
-                @if (_batch.Status == BatchStatus.Draft)
+                @if (IsEditable)
                 {
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add"
                                OnClick="OpenAddLineDialog">
@@ -41,12 +41,16 @@ else if (_batch is not null)
                     {
                         <MudButton Variant="Variant.Filled" Color="Color.Primary"
                                    StartIcon="@Icons.Material.Filled.Send" OnClick="SubmitBatch">
-                            Υποβολή / Submit
+                            @(_batch.Status == BatchStatus.Rejected ? "Επανυποβολή / Resubmit" : "Υποβολή / Submit")
                         </MudButton>
                     }
                 }
                 @if (_batch.Status == BatchStatus.Submitted && AppState.IsApprover)
                 {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                               StartIcon="@Icons.Material.Filled.Cancel" OnClick="RejectBatch">
+                        Απόρριψη Batch / Reject
+                    </MudButton>
                     <MudButton Variant="Variant.Filled" Color="Color.Success"
                                StartIcon="@Icons.Material.Filled.CheckCircle" OnClick="ApproveBatch"
                                Disabled="!_batch.Lines.All(l => l.LineStatus == LineStatus.Approved)">
@@ -103,7 +107,7 @@ else if (_batch is not null)
                             <LineStatusBadge Status="@context.LineStatus" />
                         </MudTd>
                         <MudTd>
-                            @if (_batch.Status == BatchStatus.Draft)
+                            @if (IsEditable)
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
                                                Color="Color.Error" OnClick="@(() => RemoveLine(context.LineID))" />
@@ -196,6 +200,8 @@ else if (_batch is not null)
     private bool _loading = true;
     private HashSet<BatchLineDto> _selectedLines = [];
 
+    private bool IsEditable => _batch?.Status is BatchStatus.Draft or BatchStatus.Rejected;
+
     protected override async Task OnInitializedAsync() => await LoadData();
 
     private async Task LoadData()
@@ -203,6 +209,22 @@ else if (_batch is not null)
         _loading = true;
         _batch = await BatchSvc.GetByIdAsync(BatchID);
         _loading = false;
+    }
+
+    // Runs a service call, shows its error (workflow rule or authorization) and reloads.
+    private async Task Run(Func<Task> action, string? success = null, Severity severity = Severity.Success)
+    {
+        try
+        {
+            await action();
+            if (success is not null) Snackbar.Add(success, severity);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or ArgumentException)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        _selectedLines.Clear();
+        await LoadData();
     }
 
     private async Task OpenAddLineDialog()
@@ -217,64 +239,45 @@ else if (_batch is not null)
     private async Task RemoveLine(int lineID)
     {
         var ok = await Dialog.ShowMessageBox("Διαγραφή", "Διαγραφή γραμμής;", "Ναι", "Όχι");
-        if (ok == true) { await BatchSvc.RemoveLineAsync(lineID); await LoadData(); }
+        if (ok == true) await Run(() => BatchSvc.RemoveLineAsync(lineID));
     }
 
     private async Task SubmitBatch()
     {
         var ok = await Dialog.ShowMessageBox("Υποβολή", "Υποβολή batch για έγκριση;", "Ναι", "Όχι");
-        if (ok == true)
-        {
-            await BatchSvc.SubmitAsync(BatchID, AppState.CurrentUserID);
-            Snackbar.Add("Υποβλήθηκε επιτυχώς.", Severity.Success);
-            await LoadData();
-        }
+        if (ok == true) await Run(() => BatchSvc.SubmitAsync(BatchID, AppState.CurrentUserID), "Υποβλήθηκε επιτυχώς.");
     }
 
-    private async Task ApproveLine(int lineID)
-    {
-        await BatchSvc.ApproveLinesAsync([new ApproveBatchLineDto(lineID, AppState.CurrentUserID, null)]);
-        Snackbar.Add("Εγκρίθηκε.", Severity.Success);
-        await LoadData();
-    }
+    private Task ApproveLine(int lineID) =>
+        Run(() => BatchSvc.ApproveLinesAsync([new ApproveBatchLineDto(lineID, AppState.CurrentUserID, null)]), "Εγκρίθηκε.");
 
-    private async Task RejectLine(int lineID)
-    {
-        await BatchSvc.RejectLinesAsync([new RejectBatchLineDto(lineID, AppState.CurrentUserID, null)]);
-        Snackbar.Add("Απορρίφθηκε.", Severity.Warning);
-        await LoadData();
-    }
+    private Task RejectLine(int lineID) =>
+        Run(() => BatchSvc.RejectLinesAsync([new RejectBatchLineDto(lineID, AppState.CurrentUserID, null)]), "Απορρίφθηκε.", Severity.Warning);
 
-    private async Task ApproveSelected()
+    private Task ApproveSelected()
     {
         var dtos = _selectedLines.Select(l => new ApproveBatchLineDto(l.LineID, AppState.CurrentUserID, null)).ToList();
-        await BatchSvc.ApproveLinesAsync(dtos);
-        Snackbar.Add($"Εγκρίθηκαν {dtos.Count} γραμμές.", Severity.Success);
-        _selectedLines.Clear();
-        await LoadData();
+        return Run(() => BatchSvc.ApproveLinesAsync(dtos), $"Εγκρίθηκαν {dtos.Count} γραμμές.");
     }
 
-    private async Task RejectSelected()
+    private Task RejectSelected()
     {
         var dtos = _selectedLines.Select(l => new RejectBatchLineDto(l.LineID, AppState.CurrentUserID, null)).ToList();
-        await BatchSvc.RejectLinesAsync(dtos);
-        Snackbar.Add($"Απορρίφθηκαν {dtos.Count} γραμμές.", Severity.Warning);
-        _selectedLines.Clear();
-        await LoadData();
+        return Run(() => BatchSvc.RejectLinesAsync(dtos), $"Απορρίφθηκαν {dtos.Count} γραμμές.", Severity.Warning);
     }
 
     private async Task ApproveBatch()
     {
         var ok = await Dialog.ShowMessageBox("Έγκριση Batch", "Οριστική έγκριση και αποστολή τιμών στο ERP;", "Ναι", "Όχι");
         if (ok == true)
-        {
-            try
-            {
-                await BatchSvc.ApproveBatchAsync(BatchID, AppState.CurrentUserID);
-                Snackbar.Add("Το batch εγκρίθηκε! Οι τιμές ενημερώθηκαν.", Severity.Success);
-                await LoadData();
-            }
-            catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
-        }
+            await Run(() => BatchSvc.ApproveBatchAsync(BatchID, AppState.CurrentUserID), "Το batch εγκρίθηκε! Οι τιμές ενημερώθηκαν.");
+    }
+
+    private async Task RejectBatch()
+    {
+        var ok = await Dialog.ShowMessageBox("Απόρριψη Batch",
+            "Απόρριψη του batch; Ο αιτών θα μπορεί να το διορθώσει και να το υποβάλει ξανά.", "Ναι", "Όχι");
+        if (ok == true)
+            await Run(() => BatchSvc.RejectBatchAsync(BatchID, AppState.CurrentUserID), "Το batch απορρίφθηκε.", Severity.Warning);
     }
 }

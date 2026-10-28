@@ -3,6 +3,14 @@ using SmartPricing.Domain.Entities;
 
 namespace SmartPricing.Application.Interfaces;
 
+/// <summary>The signed-in user for the current request or circuit.</summary>
+public interface ICurrentUser
+{
+    int UserID { get; }
+    bool IsAuthenticated { get; }
+    bool IsInRole(string role);
+}
+
 public interface ISupplierPriceService
 {
     Task<List<SupplierPriceDto>> GetAllAsync(bool activeOnly = true);
@@ -32,6 +40,7 @@ public interface IBatchService
     Task ApproveBatchAsync(int batchID, int approverID);
     Task ApproveLinesAsync(List<ApproveBatchLineDto> lines);
     Task RejectLinesAsync(List<RejectBatchLineDto> lines);
+    Task RejectBatchAsync(int batchID, int approverID);
 }
 
 public interface IPricingRuleService
@@ -59,7 +68,8 @@ public interface IDashboardService
 
 public interface IUserService
 {
-    Task<UserDto?> AuthenticateAsync(LoginDto dto);
+    Task<AuthResultDto> AuthenticateAsync(LoginDto dto);
+    Task<bool> ChangePasswordAsync(int userID, string currentPassword, string newPassword);
     Task<UserDto?> GetByIdAsync(int userID);
     Task<List<UserDto>> GetAllAsync();
     Task<int> CreateAsync(CreateUserDto dto);
