@@ -66,6 +66,12 @@
             @if (AppState.IsAdmin || AppState.IsApprover)
             {
                 <MudNavGroup Title="Διαχείριση / Admin" Icon="@Icons.Material.Filled.Settings" Expanded>
+                    <MudNavLink Href="/items" Icon="@Icons.Material.Filled.Inventory2">
+                        Είδη / Items
+                    </MudNavLink>
+                    <MudNavLink Href="/master-data" Icon="@Icons.Material.Filled.FolderOpen">
+                        Βασικά Αρχεία / Master Data
+                    </MudNavLink>
                     <MudNavLink Href="/pricing-rules" Icon="@Icons.Material.Filled.Rule">
                         Κανόνες Τιμολόγησης
                     </MudNavLink>

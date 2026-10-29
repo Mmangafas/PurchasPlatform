@@ -25,6 +25,7 @@ public interface ISupplierPriceService
     Task<List<SupplierPriceDto>> GetByItemAsync(int itemID);
     Task<SupplierPriceDto?> GetCurrentAsync(int supplierID, int itemID);
     Task<int> CreateAsync(CreateSupplierPriceDto dto);
+    Task UpdateAsync(int supplierPriceID, CreateSupplierPriceDto dto);
     Task DeleteAsync(int supplierPriceID);
 }
 
@@ -32,7 +33,13 @@ public interface ISellingPriceService
 {
     Task<List<CalculatedPriceDto>> GetAllAsync();
     Task<CalculatedPriceDto?> CalculateAsync(CalculatePriceRequest request);
-    Task<List<CalculatedPriceDto>> RecalculateAllAsync(int createdBy);
+    /// <summary>
+    /// Calculates selling prices for every active item and channel from the supplier cost valid on
+    /// <paramref name="priceDate"/> (default today), e.g. a date 10 days ahead for prices that start then.
+    /// </summary>
+    Task<List<CalculatedPriceDto>> RecalculateAllAsync(int createdBy, DateOnly? priceDate = null);
+    /// <summary>Active items without a supplier price valid on the date, with the start date of the next one if any.</summary>
+    Task<List<ItemWithoutCostDto>> GetItemsWithoutCostAsync(DateOnly priceDate);
 }
 
 public interface IBatchService
@@ -105,5 +112,10 @@ public interface IMasterDataService
     Task<List<Channel>> GetChannelsAsync();
     Task<List<Supplier>> GetSuppliersAsync(bool activeOnly = true);
     Task<List<Item>> GetItemsAsync(bool activeOnly = true);
+    Task<int> SaveItemAsync(SaveItemDto dto);
+    Task<List<LookupDto>> GetLookupsAsync(MasterDataKind kind, bool activeOnly = false);
+    Task SaveLookupAsync(MasterDataKind kind, LookupDto dto);
+    /// <summary>Deletes an unused row; rows still referenced must be deactivated instead.</summary>
+    Task DeleteLookupAsync(MasterDataKind kind, int id);
     Task<List<RoundingRule>> GetRoundingRulesAsync();
 }

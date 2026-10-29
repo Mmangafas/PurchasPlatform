@@ -1,0 +1,137 @@
+@page "/items"
+@attribute [Authorize(Policy = "RequireApprover")]
+@inject IMasterDataService MasterSvc
+@inject IDialogService Dialog
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Domain.Entities
+@using MudBlazor
+
+<PageTitle>Είδη — Smart Pricing</PageTitle>
+
+<div class="sp-page-header">
+    <MudStack Row AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+        <div>
+            <MudText Typo="Typo.h4" Class="fw-700">Είδη</MudText>
+            <div class="text-muted">Items — master data (also synced from the ERP)</div>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="@(() => OpenDialog(null))">
+            Νέο Είδος / New Item
+        </MudButton>
+    </MudStack>
+</div>
+
+<div class="sp-card mb-4" style="padding:14px 20px">
+    <MudStack Row AlignItems="AlignItems.Center" Spacing="4">
+        <MudTextField @bind-Value="_search" Placeholder="Αναζήτηση κωδικού ή περιγραφής / Search code or name"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Immediate DebounceInterval="200" Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" />
+        <MudSwitch @bind-Value="_showInactive" Color="Color.Primary" Label="Και ανενεργά / Show inactive" />
+    </MudStack>
+</div>
+
+<div class="sp-card">
+    <MudTable Items="FilteredItems" Hover Dense Elevation="0" Loading="_loading">
+        <HeaderContent>
+            <MudTh>Κωδικός / Code</MudTh>
+            <MudTh>Περιγραφή / Name</MudTh>
+            <MudTh>Κατηγορία › Ομάδα › Υποομάδα</MudTh>
+            <MudTh>Μ.Μ. / Unit</MudTh>
+            <MudTh>Barcode</MudTh>
+            <MudTh>Συσκευασίες / Packaging</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd Class="text-mono fw-700">@context.ERPItemCode</MudTd>
+            <MudTd>@context.ItemName</MudTd>
+            <MudTd>
+                @if (context.Category is not null)
+                {
+                    <span>@context.Category.Name</span>
+                    @if (context.ItemGroup is not null)
+                    {
+                        <span class="text-muted"> › @context.ItemGroup.Name</span>
+                    }
+                    @if (context.ItemSubgroup is not null)
+                    {
+                        <span class="text-muted"> › @context.ItemSubgroup.Name</span>
+                    }
+                }
+                else
+                {
+                    <span class="text-muted">—</span>
+                }
+            </MudTd>
+            <MudTd>@context.Unit?.Code</MudTd>
+            <MudTd Class="text-mono" Style="font-size:.8rem">@(context.Barcode ?? "—")</MudTd>
+            <MudTd>
+                @foreach (var p in context.Packagings)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" title="@p.Barcode">
+                        @p.PackagingUnit?.Code = @p.PackagingUnit?.Factor.ToString("0.###") @context.Unit?.Code
+                    </MudChip>
+                }
+            </MudTd>
+            <MudTd>
+                <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">
+                    @(context.IsActive ? "Ενεργό" : "Ανενεργό")
+                </MudChip>
+            </MudTd>
+            <MudTd>
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                               OnClick="@(() => OpenDialog(context))" title="Επεξεργασία / Edit" />
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-6 text-muted" Style="text-align:center">
+                Δεν βρέθηκαν είδη / No items found
+            </MudText>
+        </NoRecordsContent>
+    </MudTable>
+</div>
+
+@code {
+    private List<Item> _items = [];
+    private List<LookupDto> _categories = [], _groups = [], _subgroups = [], _units = [], _packagingUnits = [];
+    private string _search = "";
+    private bool _showInactive;
+    private bool _loading = true;
+
+    private IEnumerable<Item> FilteredItems => _items
+        .Where(i => _showInactive || i.IsActive)
+        .Where(i => string.IsNullOrWhiteSpace(_search) ||
+                    i.ERPItemCode.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    i.ItemName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    (i.Barcode?.Contains(_search) ?? false) ||
+                    i.Packagings.Any(p => p.Barcode?.Contains(_search) ?? false));
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        _items = await MasterSvc.GetItemsAsync(activeOnly: false);
+        // All rows, including inactive ones: the form hides inactive rows unless the item still uses them.
+        _categories = await MasterSvc.GetLookupsAsync(MasterDataKind.Category);
+        _groups = await MasterSvc.GetLookupsAsync(MasterDataKind.ItemGroup);
+        _subgroups = await MasterSvc.GetLookupsAsync(MasterDataKind.ItemSubgroup);
+        _units = await MasterSvc.GetLookupsAsync(MasterDataKind.UnitOfMeasure);
+        _packagingUnits = await MasterSvc.GetLookupsAsync(MasterDataKind.PackagingUnit);
+        _loading = false;
+    }
+
+    private async Task OpenDialog(Item? item)
+    {
+        var parameters = new DialogParameters
+        {
+            ["Item"] = item, ["Categories"] = _categories, ["Groups"] = _groups, ["Subgroups"] = _subgroups,
+            ["Units"] = _units, ["PackagingUnits"] = _packagingUnits
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await Dialog.ShowAsync<ItemDialog>(item is null ? "Νέο Είδος" : "Επεξεργασία Είδους", parameters, options);
+        var result = await dialog.Result;
+        if (!result!.Canceled) await LoadData();
+    }
+}

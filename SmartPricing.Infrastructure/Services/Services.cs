@@ -45,7 +45,9 @@ internal static class DbContextExtensions
 public class MasterDataService : IMasterDataService
 {
     private readonly SmartPricingDbContext _db;
-    public MasterDataService(SmartPricingDbContext db) => _db = db;
+    private readonly IAuditService _audit;
+    private readonly ICurrentUser _user;
+    public MasterDataService(SmartPricingDbContext db, IAuditService audit, ICurrentUser user) { _db = db; _audit = audit; _user = user; }
 
     public Task<List<Category>> GetCategoriesAsync() =>
         _db.Categories.OrderBy(c => c.Name).ToListAsync();
@@ -57,10 +59,299 @@ public class MasterDataService : IMasterDataService
         _db.Suppliers.Where(s => !activeOnly || s.IsActive).OrderBy(s => s.SupplierName).ToListAsync();
 
     public Task<List<Item>> GetItemsAsync(bool activeOnly = true) =>
-        _db.Items.Include(i => i.Category).Where(i => !activeOnly || i.IsActive).OrderBy(i => i.ItemName).ToListAsync();
+        _db.Items.Include(i => i.Category).Include(i => i.ItemGroup).Include(i => i.ItemSubgroup).Include(i => i.Unit)
+            .Include(i => i.Packagings).ThenInclude(p => p.PackagingUnit)
+            .Where(i => !activeOnly || i.IsActive).OrderBy(i => i.ItemName).ToListAsync();
 
     public Task<List<RoundingRule>> GetRoundingRulesAsync() =>
         _db.RoundingRules.Where(r => r.IsActive).ToListAsync();
+
+    public async Task<int> SaveItemAsync(SaveItemDto dto)
+    {
+        _user.Require(Roles.Approver);
+        var code = dto.ErpItemCode?.Trim() ?? "";
+        var name = dto.ItemName?.Trim() ?? "";
+        if (code.Length == 0 || name.Length == 0 || dto.UnitID == 0)
+            throw new ArgumentException("Κωδικός, περιγραφή και μονάδα μέτρησης είναι υποχρεωτικά / Code, name and unit are required.");
+        if (await _db.Items.AnyAsync(i => i.ERPItemCode == code && i.ItemID != (dto.ItemID ?? 0)))
+            throw new InvalidOperationException($"Υπάρχει ήδη είδος με κωδικό {code} / An item with code {code} already exists.");
+        if (!await _db.UnitsOfMeasure.AnyAsync(u => u.UnitID == dto.UnitID))
+            throw new ArgumentException("Unit not found");
+
+        var (categoryID, groupID, subgroupID) = await ResolveHierarchyAsync(dto.CategoryID, dto.GroupID, dto.SubgroupID);
+        var packagings = dto.Packagings ?? [];
+        await ValidatePackagingsAsync(dto.ItemID ?? 0, dto.UnitID, Clean(dto.Barcode), packagings);
+
+        Item item;
+        string? before = null;
+        if (dto.ItemID is int id)
+        {
+            item = await _db.Items.Include(i => i.Packagings).FirstOrDefaultAsync(i => i.ItemID == id)
+                ?? throw new InvalidOperationException("Item not found");
+            before = Describe(item);
+            _db.ItemPackagings.RemoveRange(item.Packagings);
+            item.Packagings.Clear();
+        }
+        else
+        {
+            item = new Item { CreatedBy = _user.UserID };
+            _db.Items.Add(item);
+        }
+
+        item.ERPItemCode = code;
+        item.ItemName = name;
+        item.UnitID = dto.UnitID;
+        item.Barcode = Clean(dto.Barcode);
+        item.CategoryID = categoryID;
+        item.ItemGroupID = groupID;
+        item.ItemSubgroupID = subgroupID;
+        item.IsActive = dto.IsActive;
+        foreach (var p in packagings)
+            item.Packagings.Add(new ItemPackaging { PackagingUnitID = p.PackagingUnitID, Barcode = Clean(p.Barcode) });
+
+        if (before is not null)
+        {
+            _audit.Log(_user.UserID, "Update", "Item", item.ItemID, before, Describe(item));
+            await _db.SaveChangesAsync();
+        }
+        else
+        {
+            await _db.InTransactionAsync(async () =>
+            {
+                await _db.SaveChangesAsync();
+                _audit.Log(_user.UserID, "Create", "Item", item.ItemID, null, Describe(item));
+                await _db.SaveChangesAsync();
+            });
+        }
+        return item.ItemID;
+    }
+
+    /// <summary>
+    /// Category → Group → Subgroup: the most specific level chosen determines the levels above it,
+    /// and a level that was also chosen must match.
+    /// </summary>
+    private async Task<(int? CategoryID, int? GroupID, int? SubgroupID)> ResolveHierarchyAsync(int? categoryID, int? groupID, int? subgroupID)
+    {
+        const string mismatch = "Η υποομάδα/ομάδα δεν ανήκει στην επιλεγμένη ομάδα/κατηγορία / The subgroup or group doesn't belong to the selected group or category.";
+        if (subgroupID is int sg)
+        {
+            var parent = await _db.ItemSubgroups.Where(s => s.ItemSubgroupID == sg)
+                .Select(s => new { s.ItemGroupID, s.ItemGroup!.CategoryID }).FirstOrDefaultAsync()
+                ?? throw new ArgumentException("Subgroup not found");
+            if ((groupID is not null && groupID != parent.ItemGroupID) || (categoryID is not null && categoryID != parent.CategoryID))
+                throw new ArgumentException(mismatch);
+            return (parent.CategoryID, parent.ItemGroupID, sg);
+        }
+        if (groupID is int g)
+        {
+            var groupCategory = await _db.ItemGroups.Where(x => x.ItemGroupID == g).Select(x => (int?)x.CategoryID).FirstOrDefaultAsync()
+                ?? throw new ArgumentException("Group not found");
+            if (categoryID is not null && categoryID != groupCategory)
+                throw new ArgumentException(mismatch);
+            return (groupCategory, g, null);
+        }
+        return (categoryID, null, null);
+    }
+
+    /// <summary>Packaging units must convert to the item's unit; barcodes must be unique across items and packagings.</summary>
+    private async Task ValidatePackagingsAsync(int itemID, int unitID, string? unitBarcode, List<ItemPackagingDto> packagings)
+    {
+        if (packagings.GroupBy(p => p.PackagingUnitID).Any(g => g.Count() > 1))
+            throw new ArgumentException("Κάθε μονάδα συσκευασίας μία φορά / Each packaging unit can be used once per item.");
+
+        var ids = packagings.Select(p => p.PackagingUnitID).ToList();
+        var wrongUnit = await _db.PackagingUnits.Where(p => ids.Contains(p.PackagingUnitID) && p.UnitID != unitID)
+            .Select(p => p.Code).ToListAsync();
+        if (wrongUnit.Count > 0)
+            throw new ArgumentException($"Οι συσκευασίες {string.Join(", ", wrongUnit)} δεν μετατρέπονται στη μονάδα του είδους / " +
+                                        $"Packaging {string.Join(", ", wrongUnit)} doesn't convert to the item's unit.");
+
+        var barcodes = packagings.Select(p => Clean(p.Barcode)).Append(unitBarcode).OfType<string>().ToList();
+        if (barcodes.Count != barcodes.Distinct().Count())
+            throw new ArgumentException("Το ίδιο barcode χρησιμοποιείται δύο φορές / The same barcode is used twice.");
+        var taken = await _db.Items.Where(i => i.ItemID != itemID && i.Barcode != null && barcodes.Contains(i.Barcode)).Select(i => i.Barcode)
+            .Concat(_db.ItemPackagings.Where(p => p.ItemID != itemID && p.Barcode != null && barcodes.Contains(p.Barcode)).Select(p => p.Barcode))
+            .FirstOrDefaultAsync();
+        if (taken is not null)
+            throw new InvalidOperationException($"Το barcode {taken} ανήκει σε άλλο είδος / Barcode {taken} belongs to another item.");
+    }
+
+    private static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private static string Describe(Item i) =>
+        $"{i.ERPItemCode} {i.ItemName} Unit={i.UnitID} BC={i.Barcode ?? "-"} " +
+        $"Cat={i.CategoryID?.ToString() ?? "-"}/{i.ItemGroupID?.ToString() ?? "-"}/{i.ItemSubgroupID?.ToString() ?? "-"} " +
+        $"Pack={string.Join(",", i.Packagings.Select(p => $"{p.PackagingUnitID}:{p.Barcode ?? "-"}"))} Active={i.IsActive}";
+
+    // ── Code/name master data ────────────────────────────────────────────────
+
+    public async Task<List<LookupDto>> GetLookupsAsync(MasterDataKind kind, bool activeOnly = false)
+    {
+        var rows = kind switch
+        {
+            MasterDataKind.Supplier => await _db.Suppliers
+                .Select(x => new LookupDto(x.SupplierID, x.ERPSupplierCode, x.SupplierName, x.IsActive, null, null, null)).ToListAsync(),
+            MasterDataKind.Category => await _db.Categories
+                .Select(x => new LookupDto(x.CategoryID, x.Code, x.Name, x.IsActive, null, null, null)).ToListAsync(),
+            MasterDataKind.ItemGroup => await _db.ItemGroups
+                .Select(x => new LookupDto(x.ItemGroupID, x.Code, x.Name, x.IsActive, x.CategoryID, x.Category!.Name, null)).ToListAsync(),
+            MasterDataKind.ItemSubgroup => await _db.ItemSubgroups
+                .Select(x => new LookupDto(x.ItemSubgroupID, x.Code, x.Name, x.IsActive, x.ItemGroupID, x.ItemGroup!.Name, null)).ToListAsync(),
+            MasterDataKind.UnitOfMeasure => await _db.UnitsOfMeasure
+                .Select(x => new LookupDto(x.UnitID, x.Code, x.Name, x.IsActive, null, null, null)).ToListAsync(),
+            MasterDataKind.PackagingUnit => await _db.PackagingUnits
+                .Select(x => new LookupDto(x.PackagingUnitID, x.Code, x.Name, x.IsActive, x.UnitID, x.Unit!.Code, x.Factor)).ToListAsync(),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
+        return rows.Where(x => !activeOnly || x.IsActive).OrderBy(x => x.ParentName).ThenBy(x => x.Code).ToList();
+    }
+
+    public async Task SaveLookupAsync(MasterDataKind kind, LookupDto dto)
+    {
+        _user.Require(Roles.Approver);
+        var code = dto.Code?.Trim() ?? "";
+        var name = dto.Name?.Trim() ?? "";
+        if (code.Length == 0 || name.Length == 0)
+            throw new ArgumentException("Κωδικός και περιγραφή είναι υποχρεωτικά / Code and name are required.");
+        if (MasterDataKinds.ParentOf(kind) is not null && dto.ParentID is null)
+            throw new ArgumentException(kind switch
+            {
+                MasterDataKind.ItemGroup => "Επιλέξτε κατηγορία / Select a category.",
+                MasterDataKind.ItemSubgroup => "Επιλέξτε ομάδα / Select a group.",
+                _ => "Επιλέξτε μονάδα μέτρησης / Select a unit of measure."
+            });
+        if (kind == MasterDataKind.PackagingUnit && dto.Factor is not > 0)
+            throw new ArgumentException("Ο συντελεστής μετατροπής πρέπει να είναι > 0 / The conversion factor must be greater than 0.");
+
+        var id = dto.ID;
+        var parentID = dto.ParentID ?? 0;
+        var codeTaken = kind switch
+        {
+            MasterDataKind.Supplier => await _db.Suppliers.AnyAsync(x => x.ERPSupplierCode == code && x.SupplierID != id),
+            MasterDataKind.Category => await _db.Categories.AnyAsync(x => x.Code == code && x.CategoryID != id),
+            MasterDataKind.ItemGroup => await _db.ItemGroups.AnyAsync(x => x.Code == code && x.CategoryID == parentID && x.ItemGroupID != id),
+            MasterDataKind.ItemSubgroup => await _db.ItemSubgroups.AnyAsync(x => x.Code == code && x.ItemGroupID == parentID && x.ItemSubgroupID != id),
+            MasterDataKind.UnitOfMeasure => await _db.UnitsOfMeasure.AnyAsync(x => x.Code == code && x.UnitID != id),
+            MasterDataKind.PackagingUnit => await _db.PackagingUnits.AnyAsync(x => x.Code == code && x.PackagingUnitID != id),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
+        if (codeTaken)
+            throw new InvalidOperationException($"Ο κωδικός {code} υπάρχει ήδη / Code {code} already exists.");
+
+        Func<int> getID;
+        string? before = null;
+        switch (kind)
+        {
+            case MasterDataKind.Supplier:
+            {
+                var e = id == 0 ? _db.Suppliers.Add(new Supplier { CreatedBy = _user.UserID }).Entity : await FindAsync<Supplier>(id);
+                if (id != 0) before = $"{e.ERPSupplierCode} {e.SupplierName} Active={e.IsActive}";
+                e.ERPSupplierCode = code; e.SupplierName = name; e.IsActive = dto.IsActive;
+                getID = () => e.SupplierID;
+                break;
+            }
+            case MasterDataKind.Category:
+            {
+                var e = id == 0 ? _db.Categories.Add(new Category()).Entity : await FindAsync<Category>(id);
+                if (id != 0) before = $"{e.Code} {e.Name} Active={e.IsActive}";
+                e.Code = code; e.Name = name; e.IsActive = dto.IsActive;
+                getID = () => e.CategoryID;
+                break;
+            }
+            case MasterDataKind.ItemGroup:
+            {
+                var e = id == 0 ? _db.ItemGroups.Add(new ItemGroup()).Entity : await FindAsync<ItemGroup>(id);
+                if (id != 0) before = $"{e.CategoryID}/{e.Code} {e.Name} Active={e.IsActive}";
+                if (id != 0 && e.CategoryID != parentID && await _db.Items.AnyAsync(i => i.ItemGroupID == id))
+                    throw new InvalidOperationException("Η ομάδα χρησιμοποιείται από είδη — η κατηγορία δεν αλλάζει / The group is used by items, its category can't change.");
+                e.CategoryID = parentID; e.Code = code; e.Name = name; e.IsActive = dto.IsActive;
+                getID = () => e.ItemGroupID;
+                break;
+            }
+            case MasterDataKind.ItemSubgroup:
+            {
+                var e = id == 0 ? _db.ItemSubgroups.Add(new ItemSubgroup()).Entity : await FindAsync<ItemSubgroup>(id);
+                if (id != 0) before = $"{e.ItemGroupID}/{e.Code} {e.Name} Active={e.IsActive}";
+                if (id != 0 && e.ItemGroupID != parentID && await _db.Items.AnyAsync(i => i.ItemSubgroupID == id))
+                    throw new InvalidOperationException("Η υποομάδα χρησιμοποιείται από είδη — η ομάδα δεν αλλάζει / The subgroup is used by items, its group can't change.");
+                e.ItemGroupID = parentID; e.Code = code; e.Name = name; e.IsActive = dto.IsActive;
+                getID = () => e.ItemSubgroupID;
+                break;
+            }
+            case MasterDataKind.UnitOfMeasure:
+            {
+                var e = id == 0 ? _db.UnitsOfMeasure.Add(new UnitOfMeasure()).Entity : await FindAsync<UnitOfMeasure>(id);
+                if (id != 0) before = $"{e.Code} {e.Name} Active={e.IsActive}";
+                e.Code = code; e.Name = name; e.IsActive = dto.IsActive;
+                getID = () => e.UnitID;
+                break;
+            }
+            case MasterDataKind.PackagingUnit:
+            {
+                var e = id == 0 ? _db.PackagingUnits.Add(new PackagingUnit()).Entity : await FindAsync<PackagingUnit>(id);
+                if (id != 0) before = $"{e.Code} {e.Name} = {e.Factor:0.###} x {e.UnitID} Active={e.IsActive}";
+                if (id != 0 && e.UnitID != parentID && await _db.ItemPackagings.AnyAsync(p => p.PackagingUnitID == id))
+                    throw new InvalidOperationException("Η συσκευασία χρησιμοποιείται από είδη — η μονάδα δεν αλλάζει / The packaging is used by items, its unit can't change.");
+                e.UnitID = parentID; e.Factor = dto.Factor!.Value; e.Code = code; e.Name = name; e.IsActive = dto.IsActive;
+                getID = () => e.PackagingUnitID;
+                break;
+            }
+            default: throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+
+        var after = $"{(dto.ParentID is null ? "" : dto.ParentID + "/")}{code} {name}" +
+                    $"{(dto.Factor is null ? "" : $" = {dto.Factor:0.###}")} Active={dto.IsActive}";
+        if (id != 0)
+        {
+            _audit.Log(_user.UserID, "Update", kind.ToString(), id, before, after);
+            await _db.SaveChangesAsync();
+        }
+        else
+        {
+            await _db.InTransactionAsync(async () =>
+            {
+                await _db.SaveChangesAsync();
+                _audit.Log(_user.UserID, "Create", kind.ToString(), getID(), null, after);
+                await _db.SaveChangesAsync();
+            });
+        }
+    }
+
+    public async Task DeleteLookupAsync(MasterDataKind kind, int id)
+    {
+        _user.Require(Roles.Approver);
+        var inUse = kind switch
+        {
+            MasterDataKind.Supplier => await _db.SupplierPriceLists.AnyAsync(x => x.SupplierID == id),
+            MasterDataKind.Category => await _db.Items.AnyAsync(x => x.CategoryID == id) || await _db.ItemGroups.AnyAsync(x => x.CategoryID == id)
+                                       || await _db.PricingRules.AnyAsync(x => x.CategoryID == id),
+            MasterDataKind.ItemGroup => await _db.Items.AnyAsync(x => x.ItemGroupID == id) || await _db.ItemSubgroups.AnyAsync(x => x.ItemGroupID == id),
+            MasterDataKind.ItemSubgroup => await _db.Items.AnyAsync(x => x.ItemSubgroupID == id),
+            MasterDataKind.UnitOfMeasure => await _db.Items.AnyAsync(x => x.UnitID == id) || await _db.PackagingUnits.AnyAsync(x => x.UnitID == id),
+            MasterDataKind.PackagingUnit => await _db.ItemPackagings.AnyAsync(x => x.PackagingUnitID == id),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
+        if (inUse)
+            throw new InvalidOperationException("Χρησιμοποιείται — απενεργοποιήστε το αντί να το διαγράψετε / It is in use — deactivate it instead of deleting.");
+
+        object? entity = kind switch
+        {
+            MasterDataKind.Supplier => await _db.Suppliers.FindAsync(id),
+            MasterDataKind.Category => await _db.Categories.FindAsync(id),
+            MasterDataKind.ItemGroup => await _db.ItemGroups.FindAsync(id),
+            MasterDataKind.ItemSubgroup => await _db.ItemSubgroups.FindAsync(id),
+            MasterDataKind.UnitOfMeasure => await _db.UnitsOfMeasure.FindAsync(id),
+            MasterDataKind.PackagingUnit => await _db.PackagingUnits.FindAsync(id),
+            _ => null
+        };
+        if (entity is null) return;
+        _db.Remove(entity);
+        _audit.Log(_user.UserID, "Delete", kind.ToString(), id);
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task<T> FindAsync<T>(int id) where T : class =>
+        await _db.Set<T>().FindAsync(id) ?? throw new InvalidOperationException("Not found");
 }
 
 // ── Supplier Prices ───────────────────────────────────────────────────────────
@@ -75,11 +366,12 @@ public class SupplierPriceService : ISupplierPriceService
     private IQueryable<SupplierPriceList> BaseQuery() =>
         _db.SupplierPriceLists
             .Include(s => s.Supplier)
-            .Include(s => s.Item).ThenInclude(i => i!.Category);
+            .Include(s => s.Item).ThenInclude(i => i!.Category)
+            .Include(s => s.Item).ThenInclude(i => i!.Unit);
 
     private static SupplierPriceDto Map(SupplierPriceList s) => new(
         s.SupplierPriceID, s.SupplierID, s.Supplier!.SupplierName,
-        s.ItemID, s.Item!.ERPItemCode, s.Item.ItemName, s.Item.UoM,
+        s.ItemID, s.Item!.ERPItemCode, s.Item.ItemName, s.Item.Unit?.Code ?? "",
         s.Item.Category?.Name, s.BasePrice, s.ExtraCharges, s.TotalCost,
         s.Currency, s.ValidFrom, s.ValidTo);
 
@@ -111,6 +403,7 @@ public class SupplierPriceService : ISupplierPriceService
     public async Task<int> CreateAsync(CreateSupplierPriceDto dto)
     {
         _user.Require(Roles.Requester);
+        Validate(dto);
         var entity = new SupplierPriceList
         {
             SupplierID = dto.SupplierID, ItemID = dto.ItemID,
@@ -126,6 +419,30 @@ public class SupplierPriceService : ISupplierPriceService
             await _db.SaveChangesAsync();
         });
         return entity.SupplierPriceID;
+    }
+
+    public async Task UpdateAsync(int supplierPriceID, CreateSupplierPriceDto dto)
+    {
+        _user.Require(Roles.Requester);
+        Validate(dto);
+        var entity = await _db.SupplierPriceLists.FindAsync(supplierPriceID)
+            ?? throw new InvalidOperationException("Η τιμή δεν βρέθηκε / Price not found.");
+        var before = Describe(entity);
+        entity.SupplierID = dto.SupplierID; entity.ItemID = dto.ItemID;
+        entity.BasePrice = dto.BasePrice; entity.ExtraCharges = dto.ExtraCharges;
+        entity.Currency = dto.Currency; entity.ValidFrom = dto.ValidFrom; entity.ValidTo = dto.ValidTo;
+        _audit.Log(_user.UserID, "Update", "SupplierPriceList", supplierPriceID, before, Describe(entity));
+        await _db.SaveChangesAsync();
+    }
+
+    private static void Validate(CreateSupplierPriceDto dto)
+    {
+        if (dto.SupplierID == 0 || dto.ItemID == 0)
+            throw new ArgumentException("Επιλέξτε προμηθευτή και είδος / Select a supplier and an item.");
+        if (dto.BasePrice <= 0 || dto.ExtraCharges < 0)
+            throw new ArgumentException("Η βασική τιμή πρέπει να είναι > 0 και οι επιβαρύνσεις >= 0 / Base price must be > 0 and extra charges >= 0.");
+        if (dto.ValidTo < dto.ValidFrom)
+            throw new ArgumentException("Η λήξη ισχύος είναι πριν την έναρξη / Valid To is before Valid From.");
     }
 
     public async Task DeleteAsync(int supplierPriceID)
@@ -154,22 +471,22 @@ public class SellingPriceService : ISellingPriceService
     public async Task<List<CalculatedPriceDto>> GetAllAsync()
     {
         var list = await _db.CalculatedSellingPrices
-            .Include(c => c.Item)
+            .Include(c => c.Item).ThenInclude(i => i!.Unit)
             .Include(c => c.Channel)
             .Include(c => c.Rule)
             .OrderBy(c => c.Item!.ItemName)
             .ToListAsync();
 
         return list.Select(c => new CalculatedPriceDto(
-            c.CalcPriceID, c.ItemID, c.Item!.ERPItemCode, c.Item.ItemName, c.Item.UoM,
+            c.CalcPriceID, c.ItemID, c.Item!.ERPItemCode, c.Item.ItemName, c.Item.Unit?.Code ?? "",
             c.ChannelID, c.Channel!.Name, c.Cost, c.GrossMarginPercent, c.MarkupPercent,
-            c.SuggestedPrice, c.ColorIndicator, c.Rule?.TargetMarginPercent)).ToList();
+            c.SuggestedPrice, c.ColorIndicator, c.Rule?.TargetMarginPercent, c.ValidFrom)).ToList();
     }
 
     public async Task<CalculatedPriceDto?> CalculateAsync(CalculatePriceRequest request)
     {
         _user.Require(Roles.Requester);
-        var item = await _db.Items.Include(i => i.Category).FirstOrDefaultAsync(i => i.ItemID == request.ItemID);
+        var item = await _db.Items.Include(i => i.Category).Include(i => i.Unit).FirstOrDefaultAsync(i => i.ItemID == request.ItemID);
         var channel = await _db.Channels.FindAsync(request.ChannelID);
         if (item is null || channel is null) return null;
 
@@ -179,25 +496,25 @@ public class SellingPriceService : ISellingPriceService
 
         var existing = await _db.CalculatedSellingPrices
             .FirstOrDefaultAsync(c => c.ItemID == request.ItemID && c.ChannelID == request.ChannelID);
-        var calc = Upsert(existing, item.ItemID, channel.ChannelID, request.Cost, rule);
+        var calc = Upsert(existing, item.ItemID, channel.ChannelID, request.Cost, rule, BusinessClock.Today);
 
         await _db.SaveChangesAsync();
         return ToDto(calc, item, channel, rule);
     }
 
-    public async Task<List<CalculatedPriceDto>> RecalculateAllAsync(int createdBy)
+    public async Task<List<CalculatedPriceDto>> RecalculateAllAsync(int createdBy, DateOnly? priceDate = null)
     {
         _user.Require(Roles.Requester);
-        var today = BusinessClock.Today;
+        var date = priceDate ?? BusinessClock.Today;
 
         // Load everything once, calculate in memory, save once.
-        var items = await _db.Items.Where(i => i.IsActive).ToListAsync();
+        var items = await _db.Items.Include(i => i.Unit).Where(i => i.IsActive).ToListAsync();
         var channels = await _db.Channels.ToListAsync();
         var rules = await ActiveRulesAsync();
 
-        // Latest valid supplier cost per item
+        // Latest supplier cost per item that is valid on the price date
         var costs = await _db.SupplierPriceLists
-            .Where(s => s.ValidFrom <= today && (s.ValidTo == null || s.ValidTo >= today))
+            .Where(s => s.ValidFrom <= date && (s.ValidTo == null || s.ValidTo >= date))
             .GroupBy(s => s.ItemID)
             .Select(g => g.OrderByDescending(s => s.ValidFrom).ThenByDescending(s => s.SupplierPriceID)
                 .Select(s => new { s.ItemID, Cost = s.BasePrice + s.ExtraCharges }).First())
@@ -214,13 +531,25 @@ public class SellingPriceService : ISellingPriceService
             foreach (var channel in channels)
             {
                 var rule = FindRule(rules, item.CategoryID, channel.ChannelID);
-                var calc = Upsert(existing.GetValueOrDefault((item.ItemID, channel.ChannelID)), item.ItemID, channel.ChannelID, cost, rule);
+                var calc = Upsert(existing.GetValueOrDefault((item.ItemID, channel.ChannelID)), item.ItemID, channel.ChannelID, cost, rule, date);
                 calculated.Add((calc, item, channel, rule));
             }
         }
 
         await _db.SaveChangesAsync();
         return calculated.Select(c => ToDto(c.Calc, c.Item, c.Channel, c.Rule)).ToList();
+    }
+
+    public async Task<List<ItemWithoutCostDto>> GetItemsWithoutCostAsync(DateOnly priceDate)
+    {
+        return await _db.Items
+            .Where(i => i.IsActive && !_db.SupplierPriceLists.Any(s =>
+                s.ItemID == i.ItemID && s.ValidFrom <= priceDate && (s.ValidTo == null || s.ValidTo >= priceDate)))
+            .OrderBy(i => i.ERPItemCode)
+            .Select(i => new ItemWithoutCostDto(i.ERPItemCode, i.ItemName,
+                _db.SupplierPriceLists.Where(s => s.ItemID == i.ItemID && s.ValidFrom > priceDate)
+                    .Min(s => (DateOnly?)s.ValidFrom)))
+            .ToListAsync();
     }
 
     private Task<List<PricingRule>> ActiveRulesAsync() =>
@@ -235,7 +564,8 @@ public class SellingPriceService : ISellingPriceService
             .FirstOrDefault();
 
     /// <summary>Applies the rule to the cost and writes the result into a new or existing (tracked) row.</summary>
-    private CalculatedSellingPrice Upsert(CalculatedSellingPrice? existing, int itemID, int channelID, decimal cost, PricingRule? rule)
+    private CalculatedSellingPrice Upsert(CalculatedSellingPrice? existing, int itemID, int channelID, decimal cost, PricingRule? rule,
+        DateOnly validFrom)
     {
         decimal suggestedPrice = cost;
         if (rule is not null)
@@ -265,14 +595,15 @@ public class SellingPriceService : ISellingPriceService
             ? PricingCalculator.GetColorIndicator(gm, rule.TargetMarginPercent.Value)
             : ColorIndicator.Green;
         existing.RuleID = rule?.RuleID;
+        existing.ValidFrom = validFrom;
         existing.CreatedAt = DateTime.UtcNow;
         return existing;
     }
 
     private static CalculatedPriceDto ToDto(CalculatedSellingPrice c, Item item, Channel channel, PricingRule? rule) => new(
-        c.CalcPriceID, item.ItemID, item.ERPItemCode, item.ItemName, item.UoM,
+        c.CalcPriceID, item.ItemID, item.ERPItemCode, item.ItemName, item.Unit?.Code ?? "",
         channel.ChannelID, channel.Name, c.Cost, c.GrossMarginPercent, c.MarkupPercent,
-        c.SuggestedPrice, c.ColorIndicator, rule?.TargetMarginPercent);
+        c.SuggestedPrice, c.ColorIndicator, rule?.TargetMarginPercent, c.ValidFrom);
 }
 
 // ── Batch Service ─────────────────────────────────────────────────────────────
@@ -585,6 +916,8 @@ public class ErpIntegrationService : IErpIntegrationService
         var existing = await _db.Items.Where(i => codes.Contains(i.ERPItemCode)).ToDictionaryAsync(i => i.ERPItemCode);
         var categories = (await _db.Categories.ToListAsync())
             .GroupBy(c => c.Code).ToDictionary(g => g.Key, g => g.First());
+        var units = (await _db.UnitsOfMeasure.ToListAsync())
+            .GroupBy(u => u.Code, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>();
         int count = 0;
 
@@ -595,6 +928,18 @@ public class ErpIntegrationService : IErpIntegrationService
             { errors.Add($"row {row + 1}: code and name are required"); continue; }
             if (!seen.Add(dto.ErpItemCode))
             { errors.Add($"{dto.ErpItemCode}: duplicate in payload"); continue; }
+
+            if (string.IsNullOrWhiteSpace(dto.Uom) && !existing.ContainsKey(dto.ErpItemCode))
+            { errors.Add($"{dto.ErpItemCode}: unit of measure is required"); continue; }
+
+            // Units the ERP sends that aren't in the units list yet are added to it.
+            UnitOfMeasure? unit = null;
+            if (!string.IsNullOrWhiteSpace(dto.Uom) && !units.TryGetValue(dto.Uom, out unit))
+            {
+                unit = new UnitOfMeasure { Code = dto.Uom, Name = dto.Uom };
+                units[dto.Uom] = unit;
+                _db.UnitsOfMeasure.Add(unit);
+            }
 
             Category? category = null;
             if (!string.IsNullOrWhiteSpace(dto.CategoryCode) && !categories.TryGetValue(dto.CategoryCode, out category))
@@ -610,7 +955,13 @@ public class ErpIntegrationService : IErpIntegrationService
                 _db.Items.Add(item);
             }
             item.ItemName = dto.Name;
-            item.UoM = dto.Uom ?? item.UoM;
+            if (unit is not null) item.Unit = unit;
+            // Group and subgroup belong to a category; a different category from the ERP clears them.
+            if (item.CategoryID != category?.CategoryID || category?.CategoryID == 0)
+            {
+                item.ItemGroupID = null;
+                item.ItemSubgroupID = null;
+            }
             item.Category = category;
             if (category is null) item.CategoryID = null;
             item.IsActive = dto.IsActive;

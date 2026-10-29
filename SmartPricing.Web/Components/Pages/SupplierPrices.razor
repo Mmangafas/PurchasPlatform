@@ -40,7 +40,7 @@
                            Margin="Margin.Dense" Clearable>
                     @foreach (var s in _suppliers)
                     {
-                        <MudSelectItem Value="@s.SupplierID">@s.SupplierName</MudSelectItem>
+                        <MudSelectItem Value="@((int?)s.SupplierID)">@s.SupplierName</MudSelectItem>
                     }
                 </MudSelect>
             </MudItem>
@@ -90,8 +90,12 @@
             <MudTd Class="text-mono">@context.ValidFrom.ToString("dd/MM/yyyy")</MudTd>
             <MudTd Class="text-mono">@(context.ValidTo?.ToString("dd/MM/yyyy") ?? "—")</MudTd>
             <MudTd>
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                               OnClick="@(() => DeletePrice(context.SupplierPriceID))" />
+                <MudStack Row Spacing="1">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                   OnClick="@(() => OpenDialog(context))" title="Επεξεργασία / Edit" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                   OnClick="@(() => DeletePrice(context.SupplierPriceID))" title="Διαγραφή / Delete" />
+                </MudStack>
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
@@ -130,10 +134,14 @@
         _loading = false;
     }
 
-    private async Task OpenAddDialog()
+    private Task OpenAddDialog() => OpenDialog(null);
+
+    private async Task OpenDialog(SupplierPriceDto? price)
     {
+        var parameters = new DialogParameters { ["Price"] = price };
         var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
-        var dialog = await Dialog.ShowAsync<AddSupplierPriceDialog>("Νέα Τιμή Προμηθευτή", options);
+        var dialog = await Dialog.ShowAsync<AddSupplierPriceDialog>(
+            price is null ? "Νέα Τιμή Προμηθευτή" : "Επεξεργασία Τιμής Προμηθευτή", parameters, options);
         var result = await dialog.Result;
         if (!result!.Canceled) await LoadData();
     }

@@ -1,0 +1,224 @@
+@inject IMasterDataService MasterSvc
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using SmartPricing.Domain.Entities
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            @(Item is null ? "➕ Νέο Είδος / New Item" : "✏️ Επεξεργασία Είδους / Edit Item")
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="4">
+                    <MudTextField @bind-Value="_code" Label="Κωδικός ERP / ERP Code *"
+                                  Variant="Variant.Outlined" Required AutoFocus Class="text-mono" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <MudTextField @bind-Value="_name" Label="Περιγραφή / Name *" Variant="Variant.Outlined" Required />
+                </MudItem>
+            </MudGrid>
+
+            @* Category → Group → Subgroup: each list only shows the children of the level above *@
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="4">
+                    <MudSelect T="int?" Value="_categoryID" ValueChanged="OnCategoryChanged" Label="Κατηγορία / Category"
+                               Variant="Variant.Outlined" Clearable>
+                        @foreach (var c in Active(Categories, _categoryID))
+                        {
+                            <MudSelectItem Value="@((int?)c.ID)">@c.Name (@c.Code)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudSelect T="int?" Value="_groupID" ValueChanged="OnGroupChanged" Label="Ομάδα / Group"
+                               Variant="Variant.Outlined" Clearable Disabled="_categoryID is null">
+                        @foreach (var g in Active(Groups, _groupID).Where(g => g.ParentID == _categoryID))
+                        {
+                            <MudSelectItem Value="@((int?)g.ID)">@g.Name (@g.Code)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudSelect @bind-Value="_subgroupID" Label="Υποομάδα / Subgroup" Variant="Variant.Outlined"
+                               Clearable Disabled="_groupID is null">
+                        @foreach (var s in Active(Subgroups, _subgroupID).Where(s => s.ParentID == _groupID))
+                        {
+                            <MudSelectItem Value="@((int?)s.ID)">@s.Name (@s.Code)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="4">
+                    <MudSelect T="int" Value="_unitID" ValueChanged="OnUnitChanged" Label="Μονάδα Μέτρησης / Unit *"
+                               Variant="Variant.Outlined" Required>
+                        @foreach (var u in Active(Units, _unitID))
+                        {
+                            <MudSelectItem Value="@u.ID">@u.Code — @u.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <MudTextField @bind-Value="_barcode" Label="Barcode μονάδας / Unit barcode"
+                                  Variant="Variant.Outlined" Class="text-mono" />
+                </MudItem>
+            </MudGrid>
+
+            <MudDivider />
+            <MudStack Row AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                <MudText Typo="Typo.subtitle2">📦 Συσκευασίες / Packaging</MudText>
+                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="AddPackaging" Disabled="!PackagingChoices.Any()">
+                    Προσθήκη / Add
+                </MudButton>
+            </MudStack>
+            @foreach (var p in _packagings)
+            {
+                <MudStack Row AlignItems="AlignItems.Center" Spacing="2">
+                    <MudSelect @bind-Value="p.PackagingUnitID" Label="Συσκευασία / Packaging" Variant="Variant.Outlined"
+                               Margin="Margin.Dense" Style="min-width:240px">
+                        @foreach (var u in PackagingChoices)
+                        {
+                            <MudSelectItem Value="@u.ID">@u.Code — 1 = @u.Factor?.ToString("0.###") @u.ParentName</MudSelectItem>
+                        }
+                    </MudSelect>
+                    <MudTextField @bind-Value="p.Barcode" Label="Barcode συσκευασίας / Package barcode" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" Class="text-mono" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => _packagings.Remove(p))" title="Αφαίρεση / Remove" />
+                </MudStack>
+            }
+            @if (_packagings.Count == 0)
+            {
+                <MudText Typo="Typo.caption" Class="text-muted">
+                    @(PackagingChoices.Any()
+                        ? "Χωρίς συσκευασίες / No packaging defined."
+                        : "Δεν υπάρχουν συσκευασίες για αυτή τη μονάδα / No packaging units convert to this unit.")
+                </MudText>
+            }
+
+            <MudSwitch @bind-Value="_isActive" Color="Color.Success" Label="Ενεργό / Active" />
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense>@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Ακύρωση</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" Disabled="_saving">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate Class="mr-1" /> }
+            Αποθήκευση / Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Item? Item { get; set; }
+    [Parameter] public List<LookupDto> Categories { get; set; } = [];
+    [Parameter] public List<LookupDto> Groups { get; set; } = [];
+    [Parameter] public List<LookupDto> Subgroups { get; set; } = [];
+    [Parameter] public List<LookupDto> Units { get; set; } = [];
+    [Parameter] public List<LookupDto> PackagingUnits { get; set; } = [];
+
+    private sealed class PackagingRow
+    {
+        public int PackagingUnitID { get; set; }
+        public string? Barcode { get; set; }
+    }
+
+    private string _code = "";
+    private string _name = "";
+    private int _unitID;
+    private string? _barcode;
+    private int? _categoryID;
+    private int? _groupID;
+    private int? _subgroupID;
+    private bool _isActive = true;
+    private List<PackagingRow> _packagings = [];
+    private string? _error;
+    private bool _saving;
+
+    // Only packaging units that convert to the item's unit (e.g. BOX24 = 24 PCS for a PCS item).
+    private IEnumerable<LookupDto> PackagingChoices =>
+        PackagingUnits.Where(p => p.ParentID == _unitID && (p.IsActive || _packagings.Any(r => r.PackagingUnitID == p.ID)));
+
+    // Active rows, plus the row currently selected even if it was deactivated since.
+    private static IEnumerable<LookupDto> Active(List<LookupDto> rows, int? selected) =>
+        rows.Where(r => r.IsActive || r.ID == selected);
+
+    protected override void OnParametersSet()
+    {
+        if (Item is not null)
+        {
+            _code = Item.ERPItemCode;
+            _name = Item.ItemName;
+            _unitID = Item.UnitID;
+            _barcode = Item.Barcode;
+            _categoryID = Item.CategoryID;
+            _groupID = Item.ItemGroupID;
+            _subgroupID = Item.ItemSubgroupID;
+            _isActive = Item.IsActive;
+            _packagings = Item.Packagings
+                .Select(p => new PackagingRow { PackagingUnitID = p.PackagingUnitID, Barcode = p.Barcode })
+                .ToList();
+        }
+        else if (_unitID == 0)
+        {
+            _unitID = (Units.FirstOrDefault(u => u.Code == "PCS" && u.IsActive) ?? Units.FirstOrDefault(u => u.IsActive))?.ID ?? 0;
+        }
+    }
+
+    private void OnCategoryChanged(int? categoryID)
+    {
+        _categoryID = categoryID;
+        if (!Groups.Any(g => g.ID == _groupID && g.ParentID == categoryID)) OnGroupChanged(null);
+    }
+
+    private void OnGroupChanged(int? groupID)
+    {
+        _groupID = groupID;
+        if (!Subgroups.Any(s => s.ID == _subgroupID && s.ParentID == groupID)) _subgroupID = null;
+    }
+
+    private void OnUnitChanged(int unitID)
+    {
+        _unitID = unitID;
+        // Packagings of another unit no longer apply.
+        _packagings.RemoveAll(r => PackagingUnits.All(p => p.ID != r.PackagingUnitID || p.ParentID != unitID));
+    }
+
+    private void AddPackaging() =>
+        _packagings.Add(new PackagingRow
+        {
+            PackagingUnitID = (PackagingChoices.FirstOrDefault(u => _packagings.All(p => p.PackagingUnitID != u.ID))
+                               ?? PackagingChoices.First()).ID
+        });
+
+    private async Task Submit()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            await MasterSvc.SaveItemAsync(new SaveItemDto(Item?.ItemID, _code, _name, _unitID, _barcode,
+                _categoryID, _groupID, _subgroupID, _isActive,
+                _packagings.Select(p => new ItemPackagingDto(p.PackagingUnitID, p.Barcode)).ToList()));
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            _error = ex.Message;
+        }
+        finally { _saving = false; }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

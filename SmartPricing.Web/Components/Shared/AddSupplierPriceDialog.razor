@@ -8,13 +8,15 @@
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6">➕ Νέα Τιμή Προμηθευτή / New Supplier Price</MudText>
+        <MudText Typo="Typo.h6">
+            @(Price is null ? "➕ Νέα Τιμή Προμηθευτή / New Supplier Price" : "✏️ Επεξεργασία Τιμής / Edit Supplier Price")
+        </MudText>
     </TitleContent>
     <DialogContent>
         <MudStack Spacing="3">
             <MudSelect @bind-Value="_supplierID" Label="Προμηθευτής / Supplier *"
                        Variant="Variant.Outlined" Required>
-                @foreach (var s in _suppliers)
+                @foreach (var s in _suppliers.Where(s => s.IsActive || s.SupplierID == Price?.SupplierID))
                 {
                     <MudSelectItem Value="@s.SupplierID">@s.SupplierName (@s.ERPSupplierCode)</MudSelectItem>
                 }
@@ -22,7 +24,7 @@
 
             <MudSelect @bind-Value="_itemID" Label="Είδος / Item *"
                        Variant="Variant.Outlined" Required Clearable>
-                @foreach (var i in _items)
+                @foreach (var i in _items.Where(i => i.IsActive || i.ItemID == Price?.ItemID))
                 {
                     <MudSelectItem Value="@i.ItemID">@i.ItemName (@i.ERPItemCode)</MudSelectItem>
                 }
@@ -49,11 +51,11 @@
             <MudGrid Spacing="2">
                 <MudItem xs="6">
                     <MudDatePicker @bind-Date="_validFrom" Label="Ισχύς Από / Valid From *"
-                                   Variant="Variant.Outlined" DateFormat="dd/MM/yyyy" Required />
+                                   Variant="Variant.Outlined" DateFormat="dd/MM/yyyy" Editable="true" Required />
                 </MudItem>
                 <MudItem xs="6">
                     <MudDatePicker @bind-Date="_validTo" Label="Ισχύς Έως / Valid To"
-                                   Variant="Variant.Outlined" DateFormat="dd/MM/yyyy" Clearable />
+                                   Variant="Variant.Outlined" DateFormat="dd/MM/yyyy" Editable="true" Clearable />
                 </MudItem>
             </MudGrid>
 
@@ -81,6 +83,8 @@
 
 @code {
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>The price to edit; null creates a new one.</summary>
+    [Parameter] public SupplierPriceDto? Price { get; set; }
 
     private List<Domain.Entities.Supplier> _suppliers = [];
     private List<Domain.Entities.Item> _items = [];
@@ -96,8 +100,19 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _suppliers = await MasterSvc.GetSuppliersAsync();
-        _items = await MasterSvc.GetItemsAsync();
+        // Inactive rows are loaded too, so a price that uses one can still be edited.
+        _suppliers = await MasterSvc.GetSuppliersAsync(activeOnly: false);
+        _items = await MasterSvc.GetItemsAsync(activeOnly: false);
+        if (Price is not null)
+        {
+            _supplierID = Price.SupplierID;
+            _itemID = Price.ItemID;
+            _basePrice = Price.BasePrice;
+            _extraCharges = Price.ExtraCharges;
+            _currency = Price.Currency ?? "EUR";
+            _validFrom = Price.ValidFrom.ToDateTime(TimeOnly.MinValue);
+            _validTo = Price.ValidTo?.ToDateTime(TimeOnly.MinValue);
+        }
     }
 
     private Task<IEnumerable<Domain.Entities.Item>> SearchItems(string? search, CancellationToken ct) =>
@@ -115,11 +130,13 @@
         _saving = true;
         try
         {
-            await PriceSvc.CreateAsync(new CreateSupplierPriceDto(
+            var dto = new CreateSupplierPriceDto(
                 _supplierID, _itemID, _basePrice, _extraCharges, _currency,
                 DateOnly.FromDateTime(_validFrom.Value),
                 _validTo.HasValue ? DateOnly.FromDateTime(_validTo.Value) : null,
-                AppState.CurrentUserID));
+                AppState.CurrentUserID);
+            if (Price is null) await PriceSvc.CreateAsync(dto);
+            else await PriceSvc.UpdateAsync(Price.SupplierPriceID, dto);
             MudDialog.Close(DialogResult.Ok(true));
         }
         catch (Exception ex) { _error = ex.Message; }

@@ -10,13 +10,20 @@ public class Item
     public string ERPItemCode { get; set; } = string.Empty;
     public string ItemName { get; set; } = string.Empty;
     public int? CategoryID { get; set; }
+    public int? ItemGroupID { get; set; }
+    public int? ItemSubgroupID { get; set; }
     public int? BrandID { get; set; }
-    public string UoM { get; set; } = string.Empty;
+    public int UnitID { get; set; }                  // Base unit of measure
+    public string? Barcode { get; set; }             // Barcode of the base unit
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int? CreatedBy { get; set; }
 
     public Category? Category { get; set; }
+    public ItemGroup? ItemGroup { get; set; }
+    public ItemSubgroup? ItemSubgroup { get; set; }
+    public UnitOfMeasure? Unit { get; set; }
+    public ICollection<ItemPackaging> Packagings { get; set; } = [];
     public ICollection<SupplierPriceList> SupplierPrices { get; set; } = [];
     public ICollection<PriceBatchLine> BatchLines { get; set; } = [];
     public ICollection<PriceChangeHistory> PriceHistory { get; set; } = [];
@@ -40,9 +47,73 @@ public class Category
     public int CategoryID { get; set; }
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
 
     public ICollection<Item> Items { get; set; } = [];
     public ICollection<PricingRule> PricingRules { get; set; } = [];
+    public ICollection<ItemGroup> Groups { get; set; } = [];
+}
+
+/// <summary>Group (Ομάδα): Category → Group → Subgroup.</summary>
+public class ItemGroup
+{
+    public int ItemGroupID { get; set; }
+    public int CategoryID { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
+
+    public Category? Category { get; set; }
+    public ICollection<ItemSubgroup> Subgroups { get; set; } = [];
+}
+
+/// <summary>Subgroup (Υποομάδα), belongs to one group.</summary>
+public class ItemSubgroup
+{
+    public int ItemSubgroupID { get; set; }
+    public int ItemGroupID { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
+
+    public ItemGroup? ItemGroup { get; set; }
+}
+
+/// <summary>Unit of measure (Μονάδα Μέτρησης), e.g. PCS, KG.</summary>
+public class UnitOfMeasure
+{
+    public int UnitID { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
+/// Packaging unit (Μονάδα Συσκευασίας): one package = Factor × Unit,
+/// e.g. BOX24 = 24 PCS.
+/// </summary>
+public class PackagingUnit
+{
+    public int PackagingUnitID { get; set; }
+    public int UnitID { get; set; }
+    public decimal Factor { get; set; } = 1;
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
+
+    public UnitOfMeasure? Unit { get; set; }
+}
+
+/// <summary>A packaging an item is sold in, with the package's own barcode.</summary>
+public class ItemPackaging
+{
+    public int ItemPackagingID { get; set; }
+    public int ItemID { get; set; }
+    public int PackagingUnitID { get; set; }
+    public string? Barcode { get; set; }
+
+    public Item? Item { get; set; }
+    public PackagingUnit? PackagingUnit { get; set; }
 }
 
 public class Channel
@@ -113,6 +184,7 @@ public class CalculatedSellingPrice
     public decimal MarkupPercent { get; set; }
     public decimal SuggestedPrice { get; set; }
     public ColorIndicator ColorIndicator { get; set; }
+    public DateOnly ValidFrom { get; set; }   // Date the price is calculated for (supplier cost valid on that date)
     public int? RuleID { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int? CreatedBy { get; set; }

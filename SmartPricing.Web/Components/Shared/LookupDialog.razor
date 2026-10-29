@@ -1,0 +1,96 @@
+@* LookupDialog.razor — create/edit form for one code/name master-data row *@
+@inject IMasterDataService MasterSvc
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using MudBlazor
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3">
+            @if (ParentLabel is not null)
+            {
+                <MudSelect @bind-Value="_parentID" Label="@($"{ParentLabel} *")" Variant="Variant.Outlined" Required>
+                    @foreach (var p in ParentChoices)
+                    {
+                        <MudSelectItem Value="@((int?)p.ID)">@p.Name (@p.Code)</MudSelectItem>
+                    }
+                </MudSelect>
+            }
+            <MudTextField @bind-Value="_code" Label="Κωδικός / Code *" Variant="Variant.Outlined"
+                          Required AutoFocus Class="text-mono" />
+            <MudTextField @bind-Value="_name" Label="Περιγραφή / Name *" Variant="Variant.Outlined" Required />
+            @if (Kind == MasterDataKind.PackagingUnit)
+            {
+                <MudNumericField @bind-Value="_factor" Label="Συντελεστής μετατροπής / Conversion factor *"
+                                 Variant="Variant.Outlined" Min="0" Format="0.###"
+                                 HelperText="@($"1 {(_code == "" ? "συσκευασία" : _code)} = {_factor?.ToString("0.###") ?? "?"} {ParentChoices.FirstOrDefault(p => p.ID == _parentID)?.Code ?? "μονάδες"}")" />
+            }
+            <MudSwitch @bind-Value="_isActive" Color="Color.Success" Label="Ενεργό / Active" />
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense>@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Ακύρωση</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit" Disabled="_saving">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate Class="mr-1" /> }
+            Αποθήκευση / Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public MasterDataKind Kind { get; set; }
+    [Parameter] public LookupDto? Row { get; set; }
+    [Parameter] public string? ParentLabel { get; set; }
+    [Parameter] public List<LookupDto> Parents { get; set; } = [];
+
+    private string _code = "";
+    private string _name = "";
+    private bool _isActive = true;
+    private int? _parentID;
+    private decimal? _factor = 1;
+    private string? _error;
+    private bool _saving;
+
+    // Keep the current parent selectable even if it was deactivated since.
+    private IEnumerable<LookupDto> ParentChoices =>
+        Row?.ParentID is int current && Parents.All(p => p.ID != current)
+            ? Parents.Append(new LookupDto(current, Row.ParentName ?? current.ToString(), Row.ParentName ?? "", false))
+            : Parents;
+
+    protected override void OnParametersSet()
+    {
+        if (Row is not null)
+        {
+            _code = Row.Code;
+            _name = Row.Name;
+            _isActive = Row.IsActive;
+            _parentID = Row.ParentID;
+            _factor = Row.Factor ?? 1;
+        }
+    }
+
+    private async Task Submit()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            await MasterSvc.SaveLookupAsync(Kind, new LookupDto(Row?.ID ?? 0, _code, _name, _isActive, _parentID, null,
+                Kind == MasterDataKind.PackagingUnit ? _factor : null));
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            _error = ex.Message;
+        }
+        finally { _saving = false; }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

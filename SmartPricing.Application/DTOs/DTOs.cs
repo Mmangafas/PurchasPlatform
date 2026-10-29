@@ -47,8 +47,12 @@ public record CalculatedPriceDto(
     decimal MarkupPercent,
     decimal SuggestedPrice,
     ColorIndicator ColorIndicator,
-    decimal? TargetMargin
+    decimal? TargetMargin,
+    DateOnly ValidFrom
 );
+
+/// <summary>An active item that Recalculate All skips: no supplier price is valid on the price date.</summary>
+public record ItemWithoutCostDto(string ErpItemCode, string ItemName, DateOnly? NextValidFrom);
 
 public record CalculatePriceRequest(
     int ItemID,
@@ -137,6 +141,50 @@ public record CreatePricingRuleDto(
     int? RoundingRuleID,
     int CreatedBy
 );
+
+// ── Items ─────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Create (ItemID null) or update an item. Category → Group → Subgroup: the most specific level
+/// given determines the levels above it. Barcode is the base unit's barcode.
+/// </summary>
+public record SaveItemDto(
+    int? ItemID,
+    string ErpItemCode,
+    string ItemName,
+    int UnitID,
+    string? Barcode,
+    int? CategoryID,
+    int? GroupID,
+    int? SubgroupID,
+    bool IsActive,
+    List<ItemPackagingDto> Packagings
+);
+
+/// <summary>A packaging the item comes in, with that package's barcode.</summary>
+public record ItemPackagingDto(int PackagingUnitID, string? Barcode);
+
+// ── Master data (simple code/name lists) ──────────────────────────────────────
+
+public enum MasterDataKind { Supplier, Category, ItemGroup, ItemSubgroup, UnitOfMeasure, PackagingUnit }
+
+public static class MasterDataKinds
+{
+    /// <summary>The list a row's parent comes from: group → category, subgroup → group, packaging unit → unit.</summary>
+    public static MasterDataKind? ParentOf(MasterDataKind kind) => kind switch
+    {
+        MasterDataKind.ItemGroup => MasterDataKind.Category,
+        MasterDataKind.ItemSubgroup => MasterDataKind.ItemGroup,
+        MasterDataKind.PackagingUnit => MasterDataKind.UnitOfMeasure,
+        _ => null
+    };
+}
+
+/// <summary>
+/// A code/name master-data row. ID 0 = new. ParentID/ParentName: see MasterDataKinds.ParentOf.
+/// Factor: for a packaging unit, how many parent units one package holds.
+/// </summary>
+public record LookupDto(int ID, string Code, string Name, bool IsActive, int? ParentID = null, string? ParentName = null, decimal? Factor = null);
 
 // ── ERP ───────────────────────────────────────────────────────────────────────
 

@@ -1,0 +1,128 @@
+@* LookupTable.razor — list, search, add, edit and delete for one code/name master-data list *@
+@inject IMasterDataService MasterSvc
+@inject IDialogService Dialog
+@inject ISnackbar Snackbar
+@using SmartPricing.Application.DTOs
+@using SmartPricing.Application.Interfaces
+@using MudBlazor
+
+<MudStack Row AlignItems="AlignItems.Center" Spacing="4" Class="pa-4">
+    <MudTextField @bind-Value="_search" Placeholder="Αναζήτηση / Search"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Immediate DebounceInterval="200" Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" />
+    <MudSwitch @bind-Value="_showInactive" Color="Color.Primary" Label="Και ανενεργά / Show inactive" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="@(() => OpenDialog(null))">
+        Νέο / New
+    </MudButton>
+</MudStack>
+
+<MudTable Items="Filtered" Hover Dense Elevation="0" Loading="_loading">
+    <HeaderContent>
+        <MudTh>ID</MudTh>
+        @if (ParentLabel is not null)
+        {
+            <MudTh>@ParentLabel</MudTh>
+        }
+        <MudTh>Κωδικός / Code</MudTh>
+        <MudTh>Περιγραφή / Name</MudTh>
+        @if (Kind == MasterDataKind.PackagingUnit)
+        {
+            <MudTh>Μετατροπή / Conversion</MudTh>
+        }
+        <MudTh>Status</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd Class="text-mono text-muted">@context.ID</MudTd>
+        @if (ParentLabel is not null)
+        {
+            <MudTd>@context.ParentName <span class="text-muted text-mono">(@context.ParentID)</span></MudTd>
+        }
+        <MudTd Class="text-mono fw-700">@context.Code</MudTd>
+        <MudTd>@context.Name</MudTd>
+        @if (Kind == MasterDataKind.PackagingUnit)
+        {
+            <MudTd>1 @context.Code = @context.Factor?.ToString("0.###") @context.ParentName</MudTd>
+        }
+        <MudTd>
+            <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">
+                @(context.IsActive ? "Ενεργό" : "Ανενεργό")
+            </MudChip>
+        </MudTd>
+        <MudTd>
+            <MudStack Row Spacing="1">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                               OnClick="@(() => OpenDialog(context))" title="Επεξεργασία / Edit" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                               OnClick="@(() => Delete(context))" title="Διαγραφή / Delete" />
+            </MudStack>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Class="pa-6 text-muted" Style="text-align:center">Δεν βρέθηκαν εγγραφές / No records found</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    [Parameter, EditorRequired] public MasterDataKind Kind { get; set; }
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    private List<LookupDto> _rows = [];
+    private string _search = "";
+    private bool _showInactive;
+    private bool _loading = true;
+
+    private string? ParentLabel => Kind switch
+    {
+        MasterDataKind.ItemGroup => "Κατηγορία / Category",
+        MasterDataKind.ItemSubgroup => "Ομάδα / Group",
+        MasterDataKind.PackagingUnit => "Μονάδα Μέτρησης / Unit",
+        _ => null
+    };
+
+    private IEnumerable<LookupDto> Filtered => _rows
+        .Where(r => _showInactive || r.IsActive)
+        .Where(r => string.IsNullOrWhiteSpace(_search) ||
+                    r.Code.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    r.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    (r.ParentName?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false));
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        _rows = await MasterSvc.GetLookupsAsync(Kind);
+        _loading = false;
+    }
+
+    private async Task OpenDialog(LookupDto? row)
+    {
+        var parentKind = MasterDataKinds.ParentOf(Kind);
+        var parameters = new DialogParameters
+        {
+            ["Kind"] = Kind,
+            ["Row"] = row,
+            ["ParentLabel"] = ParentLabel,
+            ["Parents"] = parentKind is { } k ? await MasterSvc.GetLookupsAsync(k, activeOnly: true) : new List<LookupDto>()
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await Dialog.ShowAsync<LookupDialog>(row is null ? $"Νέο — {Title}" : $"Επεξεργασία — {Title}", parameters, options);
+        var result = await dialog.Result;
+        if (!result!.Canceled) await LoadData();
+    }
+
+    private async Task Delete(LookupDto row)
+    {
+        var ok = await Dialog.ShowMessageBox("Διαγραφή / Delete", $"Διαγραφή «{row.Code} — {row.Name}»;", "Ναι", "Όχι");
+        if (ok != true) return;
+        try
+        {
+            await MasterSvc.DeleteLookupAsync(Kind, row.ID);
+            Snackbar.Add("Διαγράφηκε / Deleted.", Severity.Success);
+        }
+        catch (InvalidOperationException ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        await LoadData();
+    }
+}

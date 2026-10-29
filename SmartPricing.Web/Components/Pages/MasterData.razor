@@ -1,0 +1,35 @@
+@page "/master-data"
+@attribute [Authorize(Policy = "RequireApprover")]
+@using SmartPricing.Application.DTOs
+@using MudBlazor
+
+<PageTitle>Βασικά Αρχεία — Smart Pricing</PageTitle>
+
+<div class="sp-page-header">
+    <MudText Typo="Typo.h4" Class="fw-700">Βασικά Αρχεία</MudText>
+    <div class="text-muted">Master data — Κατηγορία → Ομάδα → Υποομάδα, μονάδες και συσκευασίες</div>
+</div>
+
+<div class="sp-card">
+    @* @key: MudTabs reuses the component across panels, so each list needs its own instance *@
+    <MudTabs Rounded Outlined Color="Color.Primary" KeepPanelsAlive="false" PanelClass="pa-0">
+        <MudTabPanel Text="🏭 Προμηθευτές / Suppliers">
+            <LookupTable @key="MasterDataKind.Supplier" Kind="MasterDataKind.Supplier" Title="Προμηθευτής" />
+        </MudTabPanel>
+        <MudTabPanel Text="🏷️ Κατηγορίες / Categories">
+            <LookupTable @key="MasterDataKind.Category" Kind="MasterDataKind.Category" Title="Κατηγορία" />
+        </MudTabPanel>
+        <MudTabPanel Text="📂 Ομάδες / Groups">
+            <LookupTable @key="MasterDataKind.ItemGroup" Kind="MasterDataKind.ItemGroup" Title="Ομάδα" />
+        </MudTabPanel>
+        <MudTabPanel Text="📁 Υποομάδες / Subgroups">
+            <LookupTable @key="MasterDataKind.ItemSubgroup" Kind="MasterDataKind.ItemSubgroup" Title="Υποομάδα" />
+        </MudTabPanel>
+        <MudTabPanel Text="⚖️ Μονάδες Μέτρησης / Units">
+            <LookupTable @key="MasterDataKind.UnitOfMeasure" Kind="MasterDataKind.UnitOfMeasure" Title="Μονάδα Μέτρησης" />
+        </MudTabPanel>
+        <MudTabPanel Text="📦 Μονάδες Συσκευασίας / Packaging">
+            <LookupTable @key="MasterDataKind.PackagingUnit" Kind="MasterDataKind.PackagingUnit" Title="Μονάδα Συσκευασίας" />
+        </MudTabPanel>
+    </MudTabs>
+</div>

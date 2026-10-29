@@ -26,32 +26,40 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("AuditID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("AuditLogID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("AuditID"));
 
                     b.Property<string>("Action")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("AuditLogAction");
 
                     b.Property<int?>("EntityID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("AuditLogEntityID");
 
                     b.Property<string>("EntityName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("AuditLogEntityName");
 
                     b.Property<string>("NewValue")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("AuditLogNewValue");
 
                     b.Property<string>("OldValue")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("AuditLogOldValue");
 
                     b.Property<DateTime>("Timestamp")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("AuditLogTimestamp");
 
                     b.Property<int?>("UserID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("UserID");
 
                     b.HasKey("AuditID");
 
@@ -64,44 +72,59 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("CalcPriceID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("CalculatedSellingPriceID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("CalcPriceID"));
 
                     b.Property<int>("ChannelID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ChannelID");
 
                     b.Property<string>("ColorIndicator")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("CalculatedSellingPriceColorIndicator");
 
                     b.Property<decimal>("Cost")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("CalculatedSellingPriceCost");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("CalculatedSellingPriceCreatedAt");
 
                     b.Property<int?>("CreatedBy")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("CalculatedSellingPriceCreatedBy");
 
                     b.Property<decimal>("GrossMarginPercent")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("CalculatedSellingPriceGrossMarginPercent");
 
                     b.Property<int>("ItemID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ItemID");
 
                     b.Property<decimal>("MarkupPercent")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("CalculatedSellingPriceMarkupPercent");
 
                     b.Property<int?>("RuleID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PricingRuleID");
 
                     b.Property<decimal>("SuggestedPrice")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("CalculatedSellingPriceSuggestedPrice");
+
+                    b.Property<DateOnly>("ValidFrom")
+                        .HasColumnType("date")
+                        .HasColumnName("CalculatedSellingPriceValidFrom");
 
                     b.HasKey("CalcPriceID");
 
@@ -118,17 +141,24 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("CategoryID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("CategoryID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("CategoryID"));
 
                     b.Property<string>("Code")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("CategoryCode");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("CategoryIsActive");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("CategoryName");
 
                     b.HasKey("CategoryID");
 
@@ -139,17 +169,20 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("ChannelID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ChannelID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ChannelID"));
 
                     b.Property<string>("Code")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("ChannelCode");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("ChannelName");
 
                     b.HasKey("ChannelID");
 
@@ -180,27 +213,33 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("SyncID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ERPSyncLogID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("SyncID"));
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("ERPSyncLogCreatedAt");
 
                     b.Property<string>("Entity")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("ERPSyncLogEntity");
 
                     b.Property<string>("Message")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("ERPSyncLogMessage");
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("ERPSyncLogStatus");
 
                     b.Property<string>("SyncType")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("ERPSyncLogSyncType");
 
                     b.HasKey("SyncID");
 
@@ -211,77 +250,260 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("ItemID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ItemID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ItemID"));
 
+                    b.Property<string>("Barcode")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("ItemBarcode");
+
                     b.Property<int?>("BrandID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ItemBrandID");
 
                     b.Property<int?>("CategoryID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("CategoryID");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("ItemCreatedAt");
 
                     b.Property<int?>("CreatedBy")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ItemCreatedBy");
 
                     b.Property<string>("ERPItemCode")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("ItemCode");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
+                        .HasColumnType("bit")
+                        .HasColumnName("ItemIsActive");
+
+                    b.Property<int?>("ItemGroupID")
+                        .HasColumnType("int")
+                        .HasColumnName("GroupID");
 
                     b.Property<string>("ItemName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("ItemName");
 
-                    b.Property<string>("UoM")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                    b.Property<int?>("ItemSubgroupID")
+                        .HasColumnType("int")
+                        .HasColumnName("SubgroupID");
+
+                    b.Property<int>("UnitID")
+                        .HasColumnType("int")
+                        .HasColumnName("UnitID");
 
                     b.HasKey("ItemID");
 
                     b.HasIndex("CategoryID");
 
+                    b.HasIndex("ItemGroupID");
+
+                    b.HasIndex("ItemSubgroupID");
+
+                    b.HasIndex("UnitID");
+
                     b.ToTable("Items");
+                });
+
+            modelBuilder.Entity("SmartPricing.Domain.Entities.ItemGroup", b =>
+                {
+                    b.Property<int>("ItemGroupID")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("GroupID");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ItemGroupID"));
+
+                    b.Property<int>("CategoryID")
+                        .HasColumnType("int")
+                        .HasColumnName("CategoryID");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("GroupCode");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("GroupIsActive");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("GroupName");
+
+                    b.HasKey("ItemGroupID");
+
+                    b.HasIndex("CategoryID");
+
+                    b.ToTable("Groups", (string)null);
+                });
+
+            modelBuilder.Entity("SmartPricing.Domain.Entities.ItemPackaging", b =>
+                {
+                    b.Property<int>("ItemPackagingID")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("ItemPackagingID");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ItemPackagingID"));
+
+                    b.Property<string>("Barcode")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("ItemPackagingBarcode");
+
+                    b.Property<int>("ItemID")
+                        .HasColumnType("int")
+                        .HasColumnName("ItemID");
+
+                    b.Property<int>("PackagingUnitID")
+                        .HasColumnType("int")
+                        .HasColumnName("PackagingUnitID");
+
+                    b.HasKey("ItemPackagingID");
+
+                    b.HasIndex("ItemID");
+
+                    b.HasIndex("PackagingUnitID");
+
+                    b.ToTable("ItemPackagings");
+                });
+
+            modelBuilder.Entity("SmartPricing.Domain.Entities.ItemSubgroup", b =>
+                {
+                    b.Property<int>("ItemSubgroupID")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("SubgroupID");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ItemSubgroupID"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("SubgroupCode");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("SubgroupIsActive");
+
+                    b.Property<int>("ItemGroupID")
+                        .HasColumnType("int")
+                        .HasColumnName("GroupID");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("SubgroupName");
+
+                    b.HasKey("ItemSubgroupID");
+
+                    b.HasIndex("ItemGroupID");
+
+                    b.ToTable("Subgroups", (string)null);
+                });
+
+            modelBuilder.Entity("SmartPricing.Domain.Entities.PackagingUnit", b =>
+                {
+                    b.Property<int>("PackagingUnitID")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("PackagingUnitID");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("PackagingUnitID"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("PackagingUnitCode");
+
+                    b.Property<decimal>("Factor")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("PackagingUnitFactor");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("PackagingUnitIsActive");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("PackagingUnitName");
+
+                    b.Property<int>("UnitID")
+                        .HasColumnType("int")
+                        .HasColumnName("UnitID");
+
+                    b.HasKey("PackagingUnitID");
+
+                    b.HasIndex("UnitID");
+
+                    b.ToTable("PackagingUnits");
+
+                    b.HasData(
+                        new
+                        {
+                            PackagingUnitID = 1,
+                            Code = "BOX24",
+                            Factor = 24m,
+                            IsActive = true,
+                            Name = "Κιβώτιο 24 τεμ. / Box of 24",
+                            UnitID = 1
+                        });
                 });
 
             modelBuilder.Entity("SmartPricing.Domain.Entities.PriceBatch", b =>
                 {
                     b.Property<int>("BatchID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PriceBatchID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("BatchID"));
 
                     b.Property<DateTime?>("ApprovedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("PriceBatchApprovedAt");
 
                     b.Property<int?>("ApprovedBy")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PriceBatchApprovedBy");
 
                     b.Property<string>("BatchName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("PriceBatchName");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("PriceBatchCreatedAt");
 
                     b.Property<int>("CreatedBy")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PriceBatchCreatedBy");
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("PriceBatchStatus");
 
                     b.Property<DateTime?>("SubmittedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("PriceBatchSubmittedAt");
 
                     b.Property<int?>("SubmittedBy")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PriceBatchSubmittedBy");
 
                     b.HasKey("BatchID");
 
@@ -298,49 +520,62 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("LineID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PriceBatchLineID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("LineID"));
 
                     b.Property<string>("ApproverComment")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("PriceBatchLineApproverComment");
 
                     b.Property<int>("BatchID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PriceBatchID");
 
                     b.Property<int>("ChannelID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ChannelID");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("PriceBatchLineCreatedAt");
 
                     b.Property<int>("CreatedBy")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PriceBatchLineCreatedBy");
 
                     b.Property<DateTime?>("ExportedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("PriceBatchLineExportedAt");
 
                     b.Property<int>("ItemID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ItemID");
 
                     b.Property<string>("LineStatus")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("PriceBatchLineStatus");
 
                     b.Property<decimal?>("MarginPercent")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("PriceBatchLineMarginPercent");
 
                     b.Property<decimal>("NewPrice")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("PriceBatchLineNewPrice");
 
                     b.Property<decimal?>("OldPrice")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("PriceBatchLineOldPrice");
 
                     b.Property<string>("ReviewerComment")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("PriceBatchLineReviewerComment");
 
                     b.HasKey("LineID");
 
@@ -357,33 +592,41 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("HistoryID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PriceChangeHistoryID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("HistoryID"));
 
                     b.Property<decimal?>("ChangePercent")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("PriceChangeHistoryChangePercent");
 
                     b.Property<DateTime>("ChangedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("PriceChangeHistoryChangedAt");
 
                     b.Property<int>("ChangedBy")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PriceChangeHistoryChangedBy");
 
                     b.Property<int>("ChannelID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ChannelID");
 
                     b.Property<int>("ItemID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ItemID");
 
                     b.Property<decimal>("NewPrice")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("PriceChangeHistoryNewPrice");
 
                     b.Property<decimal?>("OldPrice")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("PriceChangeHistoryOldPrice");
 
                     b.HasKey("HistoryID");
 
@@ -400,35 +643,44 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("RuleID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PricingRuleID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("RuleID"));
 
                     b.Property<int?>("CategoryID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("CategoryID");
 
                     b.Property<int?>("ChannelID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ChannelID");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("PricingRuleCreatedAt");
 
                     b.Property<int?>("CreatedBy")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("PricingRuleCreatedBy");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
+                        .HasColumnType("bit")
+                        .HasColumnName("PricingRuleIsActive");
 
                     b.Property<decimal?>("MarkupPercent")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("PricingRuleMarkupPercent");
 
                     b.Property<int?>("RoundingRuleID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("RoundingRuleID");
 
                     b.Property<decimal?>("TargetMarginPercent")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("PricingRuleTargetMarginPercent");
 
                     b.HasKey("RuleID");
 
@@ -445,13 +697,15 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("RoleID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("RoleID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("RoleID"));
 
                     b.Property<string>("RoleName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("RoleName");
 
                     b.HasKey("RoleID");
 
@@ -484,23 +738,28 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("RoundingRuleID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("RoundingRuleID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("RoundingRuleID"));
 
                     b.Property<string>("Description")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("RoundingRuleDescription");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
+                        .HasColumnType("bit")
+                        .HasColumnName("RoundingRuleIsActive");
 
                     b.Property<string>("Pattern")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("RoundingRulePattern");
 
                     b.Property<string>("RuleName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("RoundingRuleName");
 
                     b.HasKey("RoundingRuleID");
 
@@ -537,26 +796,32 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("SupplierID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("SupplierID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("SupplierID"));
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("SupplierCreatedAt");
 
                     b.Property<int?>("CreatedBy")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("SupplierCreatedBy");
 
                     b.Property<string>("ERPSupplierCode")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("SupplierCode");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
+                        .HasColumnType("bit")
+                        .HasColumnName("SupplierIsActive");
 
                     b.Property<string>("SupplierName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("SupplierName");
 
                     b.HasKey("SupplierID");
 
@@ -567,38 +832,48 @@ namespace SmartPricing.Infrastructure.Migrations
                 {
                     b.Property<int>("SupplierPriceID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("SupplierPriceListID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("SupplierPriceID"));
 
                     b.Property<decimal>("BasePrice")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("SupplierPriceListBasePrice");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("SupplierPriceListCreatedAt");
 
                     b.Property<int?>("CreatedBy")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("SupplierPriceListCreatedBy");
 
                     b.Property<string>("Currency")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("SupplierPriceListCurrency");
 
                     b.Property<decimal>("ExtraCharges")
                         .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,4)")
+                        .HasColumnName("SupplierPriceListExtraCharges");
 
                     b.Property<int>("ItemID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("ItemID");
 
                     b.Property<int>("SupplierID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("SupplierID");
 
                     b.Property<DateOnly>("ValidFrom")
-                        .HasColumnType("date");
+                        .HasColumnType("date")
+                        .HasColumnName("SupplierPriceListValidFrom");
 
                     b.Property<DateOnly?>("ValidTo")
-                        .HasColumnType("date");
+                        .HasColumnType("date")
+                        .HasColumnName("SupplierPriceListValidTo");
 
                     b.HasKey("SupplierPriceID");
 
@@ -609,40 +884,100 @@ namespace SmartPricing.Infrastructure.Migrations
                     b.ToTable("SupplierPriceLists");
                 });
 
+            modelBuilder.Entity("SmartPricing.Domain.Entities.UnitOfMeasure", b =>
+                {
+                    b.Property<int>("UnitID")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("UnitID");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("UnitID"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("UnitCode");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("UnitIsActive");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("UnitName");
+
+                    b.HasKey("UnitID");
+
+                    b.ToTable("Units", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            UnitID = 1,
+                            Code = "PCS",
+                            IsActive = true,
+                            Name = "Τεμάχιο / Piece"
+                        },
+                        new
+                        {
+                            UnitID = 2,
+                            Code = "KG",
+                            IsActive = true,
+                            Name = "Κιλό / Kilogram"
+                        },
+                        new
+                        {
+                            UnitID = 3,
+                            Code = "LT",
+                            IsActive = true,
+                            Name = "Λίτρο / Litre"
+                        });
+                });
+
             modelBuilder.Entity("SmartPricing.Domain.Entities.User", b =>
                 {
                     b.Property<int>("UserID")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("UserID");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("UserID"));
 
                     b.Property<string>("DisplayName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("UserDisplayName");
 
                     b.Property<string>("Email")
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("UserEmail");
 
                     b.Property<int>("FailedLoginCount")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("UserFailedLoginCount");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
+                        .HasColumnType("bit")
+                        .HasColumnName("UserIsActive");
 
                     b.Property<DateTime?>("LockoutEnd")
-                        .HasColumnType("datetime2");
+                        .HasColumnType("datetime2")
+                        .HasColumnName("UserLockoutEnd");
 
                     b.Property<bool>("MustChangePassword")
-                        .HasColumnType("bit");
+                        .HasColumnType("bit")
+                        .HasColumnName("UserMustChangePassword");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("UserPasswordHash");
 
                     b.Property<string>("UserName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("UserName");
 
                     b.HasKey("UserID");
 
@@ -665,10 +1000,12 @@ namespace SmartPricing.Infrastructure.Migrations
             modelBuilder.Entity("SmartPricing.Domain.Entities.UserRole", b =>
                 {
                     b.Property<int>("UserID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("UserID");
 
                     b.Property<int>("RoleID")
-                        .HasColumnType("int");
+                        .HasColumnType("int")
+                        .HasColumnName("RoleID");
 
                     b.HasKey("UserID", "RoleID");
 
@@ -725,7 +1062,81 @@ namespace SmartPricing.Infrastructure.Migrations
                         .WithMany("Items")
                         .HasForeignKey("CategoryID");
 
+                    b.HasOne("SmartPricing.Domain.Entities.ItemGroup", "ItemGroup")
+                        .WithMany()
+                        .HasForeignKey("ItemGroupID")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("SmartPricing.Domain.Entities.ItemSubgroup", "ItemSubgroup")
+                        .WithMany()
+                        .HasForeignKey("ItemSubgroupID")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("SmartPricing.Domain.Entities.UnitOfMeasure", "Unit")
+                        .WithMany()
+                        .HasForeignKey("UnitID")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Category");
+
+                    b.Navigation("ItemGroup");
+
+                    b.Navigation("ItemSubgroup");
+
+                    b.Navigation("Unit");
+                });
+
+            modelBuilder.Entity("SmartPricing.Domain.Entities.ItemGroup", b =>
+                {
+                    b.HasOne("SmartPricing.Domain.Entities.Category", "Category")
+                        .WithMany("Groups")
+                        .HasForeignKey("CategoryID")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("SmartPricing.Domain.Entities.ItemPackaging", b =>
+                {
+                    b.HasOne("SmartPricing.Domain.Entities.Item", "Item")
+                        .WithMany("Packagings")
+                        .HasForeignKey("ItemID")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SmartPricing.Domain.Entities.PackagingUnit", "PackagingUnit")
+                        .WithMany()
+                        .HasForeignKey("PackagingUnitID")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Item");
+
+                    b.Navigation("PackagingUnit");
+                });
+
+            modelBuilder.Entity("SmartPricing.Domain.Entities.ItemSubgroup", b =>
+                {
+                    b.HasOne("SmartPricing.Domain.Entities.ItemGroup", "ItemGroup")
+                        .WithMany("Subgroups")
+                        .HasForeignKey("ItemGroupID")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ItemGroup");
+                });
+
+            modelBuilder.Entity("SmartPricing.Domain.Entities.PackagingUnit", b =>
+                {
+                    b.HasOne("SmartPricing.Domain.Entities.UnitOfMeasure", "Unit")
+                        .WithMany()
+                        .HasForeignKey("UnitID")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Unit");
                 });
 
             modelBuilder.Entity("SmartPricing.Domain.Entities.PriceBatch", b =>
@@ -869,6 +1280,8 @@ namespace SmartPricing.Infrastructure.Migrations
 
             modelBuilder.Entity("SmartPricing.Domain.Entities.Category", b =>
                 {
+                    b.Navigation("Groups");
+
                     b.Navigation("Items");
 
                     b.Navigation("PricingRules");
@@ -891,9 +1304,16 @@ namespace SmartPricing.Infrastructure.Migrations
 
                     b.Navigation("CalculatedPrices");
 
+                    b.Navigation("Packagings");
+
                     b.Navigation("PriceHistory");
 
                     b.Navigation("SupplierPrices");
+                });
+
+            modelBuilder.Entity("SmartPricing.Domain.Entities.ItemGroup", b =>
+                {
+                    b.Navigation("Subgroups");
                 });
 
             modelBuilder.Entity("SmartPricing.Domain.Entities.PriceBatch", b =>
