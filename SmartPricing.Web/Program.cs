@@ -43,13 +43,15 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.Cookie.HttpOnly = true;
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         options.Cookie.SameSite = SameSiteMode.Lax;
-    });
+    })
+    .AddScheme<AuthenticationSchemeOptions, ErpApiKeyHandler>(ErpApiKeyHandler.SchemeName, null);
 
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy("RequireAdmin", p => p.RequireRole("Admin"))
     .AddPolicy("RequireApprover", p => p.RequireRole("Approver", "Admin"))
     .AddPolicy("RequireReviewer", p => p.RequireRole("Reviewer", "Approver", "Admin"))
-    .AddPolicy("RequireRequester", p => p.RequireRole("Requester", "Reviewer", "Approver", "Admin"));
+    .AddPolicy("RequireRequester", p => p.RequireRole("Requester", "Reviewer", "Approver", "Admin"))
+    .AddPolicy("ErpApi", p => p.AddAuthenticationSchemes(ErpApiKeyHandler.SchemeName).RequireRole(SystemRoles.ErpIntegration));
 
 builder.Services.AddCascadingAuthenticationState();
 
@@ -71,6 +73,7 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddMudServices();
 
 // ── App Services ──────────────────────────────────────────────────────────────
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<AppStateService>();
 builder.Services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<AppStateService>());
 builder.Services.AddScoped<IAuditService, AuditService>();
@@ -152,6 +155,15 @@ using (var scope = app.Services.CreateScope())
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+// ── ERP API ── Authorization: Bearer {Erp:ApiKey} ────────────────────────────
+var erpApi = app.MapGroup("/api/erp").RequireAuthorization("ErpApi");
+erpApi.MapPost("/items/import", (List<ErpItemDto> items, IErpIntegrationService erp) => erp.ImportItemsAsync(items));
+erpApi.MapPost("/suppliers/import", (List<ErpSupplierDto> suppliers, IErpIntegrationService erp) => erp.ImportSuppliersAsync(suppliers));
+erpApi.MapPost("/purchase-prices/import", (List<ErpPurchasePriceDto> prices, IErpIntegrationService erp) => erp.ImportPurchasePricesAsync(prices));
+erpApi.MapGet("/selling-prices/export", (IErpIntegrationService erp, bool includeExported = false) =>
+    erp.ExportApprovedSellingPricesAsync(includeExported));
+erpApi.MapGet("/sync-logs", (IErpIntegrationService erp, int count = 50) => erp.GetSyncLogsAsync(Math.Clamp(count, 1, 500)));
 
 // ── Auth endpoints ────────────────────────────────────────────────────────────
 app.MapGet("/logout", async (HttpContext ctx) =>

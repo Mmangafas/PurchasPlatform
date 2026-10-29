@@ -11,6 +11,13 @@ public interface ICurrentUser
     bool IsInRole(string role);
 }
 
+/// <summary>Roles that are not user-assignable.</summary>
+public static class SystemRoles
+{
+    /// <summary>Granted to callers of /api/erp/* that present the configured ERP API key.</summary>
+    public const string ErpIntegration = "ErpIntegration";
+}
+
 public interface ISupplierPriceService
 {
     Task<List<SupplierPriceDto>> GetAllAsync(bool activeOnly = true);
@@ -57,7 +64,11 @@ public interface IErpIntegrationService
     Task<SyncResultDto> ImportItemsAsync(List<ErpItemDto> items);
     Task<SyncResultDto> ImportSuppliersAsync(List<ErpSupplierDto> suppliers);
     Task<SyncResultDto> ImportPurchasePricesAsync(List<ErpPurchasePriceDto> prices);
-    Task<List<ErpSellingPriceExportDto>> ExportApprovedSellingPricesAsync();
+    /// <summary>
+    /// Latest approved price per item/channel. By default only prices not exported yet;
+    /// every returned price is marked as exported.
+    /// </summary>
+    Task<List<ErpSellingPriceExportDto>> ExportApprovedSellingPricesAsync(bool includeExported = false);
     Task<List<ERPSyncLog>> GetSyncLogsAsync(int count = 50);
 }
 
@@ -79,7 +90,11 @@ public interface IUserService
 
 public interface IAuditService
 {
-    Task LogAsync(int? userID, string action, string entityName, int? entityID, string? oldValue = null, string? newValue = null);
+    /// <summary>
+    /// Queues an audit entry. It is written by the caller's next SaveChangesAsync,
+    /// in the same transaction as the change it records.
+    /// </summary>
+    void Log(int? userID, string action, string entityName, int? entityID, string? oldValue = null, string? newValue = null);
     Task<List<AuditLogDto>> GetRecentAsync(int count = 100);
     Task<List<AuditLogDto>> GetByEntityAsync(string entityName, int entityID);
 }

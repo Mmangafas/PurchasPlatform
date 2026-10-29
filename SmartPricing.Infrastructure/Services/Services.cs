@@ -16,12 +16,28 @@ internal static class Roles
     public static readonly string[] Requester = ["Requester", "Reviewer", "Approver", "Admin"];
     public static readonly string[] Approver = ["Approver", "Admin"];
     public static readonly string[] Admin = ["Admin"];
+    public static readonly string[] Erp = ["Admin", SystemRoles.ErpIntegration];
 
     public static void Require(this ICurrentUser user, string[] roles)
     {
         if (!user.IsAuthenticated || !roles.Any(user.IsInRole))
             throw new UnauthorizedAccessException("Δεν έχετε δικαίωμα για αυτή την ενέργεια / Not authorized.");
     }
+}
+
+internal static class DbContextExtensions
+{
+    /// <summary>
+    /// Runs work in one transaction, so a new row (whose ID is only known after saving)
+    /// and its audit entry are committed together. Retry-safe under an execution strategy.
+    /// </summary>
+    public static Task InTransactionAsync(this DbContext db, Func<Task> work) =>
+        db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await db.Database.BeginTransactionAsync();
+            await work();
+            await tx.CommitAsync();
+        });
 }
 
 // ── Master Data ───────────────────────────────────────────────────────────────
@@ -70,7 +86,8 @@ public class SupplierPriceService : ISupplierPriceService
     public async Task<List<SupplierPriceDto>> GetAllAsync(bool activeOnly = true)
     {
         var q = BaseQuery();
-        if (activeOnly) q = q.Where(s => s.ValidTo == null || s.ValidTo >= DateOnly.FromDateTime(DateTime.Today));
+        var today = BusinessClock.Today;
+        if (activeOnly) q = q.Where(s => s.ValidTo == null || s.ValidTo >= today);
         return (await q.OrderByDescending(s => s.ValidFrom).ToListAsync()).Select(Map).ToList();
     }
 
@@ -82,7 +99,7 @@ public class SupplierPriceService : ISupplierPriceService
 
     public async Task<SupplierPriceDto?> GetCurrentAsync(int supplierID, int itemID)
     {
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = BusinessClock.Today;
         var entity = await BaseQuery()
             .Where(s => s.SupplierID == supplierID && s.ItemID == itemID &&
                         s.ValidFrom <= today && (s.ValidTo == null || s.ValidTo >= today))
@@ -99,11 +116,15 @@ public class SupplierPriceService : ISupplierPriceService
             SupplierID = dto.SupplierID, ItemID = dto.ItemID,
             BasePrice = dto.BasePrice, ExtraCharges = dto.ExtraCharges,
             Currency = dto.Currency, ValidFrom = dto.ValidFrom, ValidTo = dto.ValidTo,
-            CreatedBy = dto.CreatedBy
+            CreatedBy = _user.UserID
         };
-        _db.SupplierPriceLists.Add(entity);
-        await _db.SaveChangesAsync();
-        await _audit.LogAsync(dto.CreatedBy, "Create", "SupplierPriceList", entity.SupplierPriceID);
+        await _db.InTransactionAsync(async () =>
+        {
+            _db.SupplierPriceLists.Add(entity);
+            await _db.SaveChangesAsync();
+            _audit.Log(_user.UserID, "Create", "SupplierPriceList", entity.SupplierPriceID, null, Describe(entity));
+            await _db.SaveChangesAsync();
+        });
         return entity.SupplierPriceID;
     }
 
@@ -113,10 +134,12 @@ public class SupplierPriceService : ISupplierPriceService
         var entity = await _db.SupplierPriceLists.FindAsync(supplierPriceID);
         if (entity is null) return;
         _db.SupplierPriceLists.Remove(entity);
+        _audit.Log(_user.UserID, "Delete", "SupplierPriceList", supplierPriceID, Describe(entity));
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(_user.UserID, "Delete", "SupplierPriceList", supplierPriceID,
-            $"{entity.SupplierID}/{entity.ItemID} {entity.BasePrice}+{entity.ExtraCharges}");
     }
+
+    private static string Describe(SupplierPriceList s) =>
+        $"{s.SupplierID}/{s.ItemID} {s.BasePrice}+{s.ExtraCharges} {s.ValidFrom:yyyy-MM-dd}";
 }
 
 // ── Selling Price / Calculation ───────────────────────────────────────────────
@@ -150,83 +173,106 @@ public class SellingPriceService : ISellingPriceService
         var channel = await _db.Channels.FindAsync(request.ChannelID);
         if (item is null || channel is null) return null;
 
-        // Find applicable pricing rule
-        PricingRule? rule = null;
-        if (request.RuleID.HasValue)
-            rule = await _db.PricingRules.Include(r => r.RoundingRule).FirstOrDefaultAsync(r => r.RuleID == request.RuleID);
-        else
-            rule = await _db.PricingRules.Include(r => r.RoundingRule)
-                .Where(r => r.IsActive &&
-                    (r.CategoryID == null || r.CategoryID == item.CategoryID) &&
-                    (r.ChannelID == null || r.ChannelID == request.ChannelID))
-                .OrderByDescending(r => r.CategoryID).ThenByDescending(r => r.ChannelID)
-                .FirstOrDefaultAsync();
+        var rule = request.RuleID.HasValue
+            ? await _db.PricingRules.Include(r => r.RoundingRule).FirstOrDefaultAsync(r => r.RuleID == request.RuleID)
+            : FindRule(await ActiveRulesAsync(), item.CategoryID, request.ChannelID);
 
-        decimal suggestedPrice = request.Cost;
-        if (rule is not null)
-        {
-            if (rule.TargetMarginPercent.HasValue)
-                suggestedPrice = PricingCalculator.SuggestPriceFromMargin(request.Cost, rule.TargetMarginPercent.Value);
-            else if (rule.MarkupPercent.HasValue)
-                suggestedPrice = PricingCalculator.SuggestPriceFromMarkup(request.Cost, rule.MarkupPercent.Value);
-
-            if (rule.RoundingRule is not null)
-                suggestedPrice = PricingCalculator.ApplyRounding(suggestedPrice, rule.RoundingRule.Pattern);
-        }
-
-        var gm = PricingCalculator.GrossMargin(suggestedPrice, request.Cost);
-        var markup = PricingCalculator.Markup(suggestedPrice, request.Cost);
-        var indicator = rule?.TargetMarginPercent.HasValue == true
-            ? PricingCalculator.GetColorIndicator(gm, rule.TargetMarginPercent.Value)
-            : ColorIndicator.Green;
-
-        // Upsert
         var existing = await _db.CalculatedSellingPrices
             .FirstOrDefaultAsync(c => c.ItemID == request.ItemID && c.ChannelID == request.ChannelID);
-
-        if (existing is null)
-        {
-            existing = new CalculatedSellingPrice { ItemID = request.ItemID, ChannelID = request.ChannelID, CreatedBy = request.CreatedBy };
-            _db.CalculatedSellingPrices.Add(existing);
-        }
-
-        existing.Cost = request.Cost;
-        existing.GrossMarginPercent = gm;
-        existing.MarkupPercent = markup;
-        existing.SuggestedPrice = suggestedPrice;
-        existing.ColorIndicator = indicator;
-        existing.RuleID = rule?.RuleID;
-        existing.CreatedAt = DateTime.UtcNow;
+        var calc = Upsert(existing, item.ItemID, channel.ChannelID, request.Cost, rule);
 
         await _db.SaveChangesAsync();
-        return new CalculatedPriceDto(existing.CalcPriceID, item.ItemID, item.ERPItemCode, item.ItemName, item.UoM,
-            channel.ChannelID, channel.Name, request.Cost, gm, markup, suggestedPrice, indicator, rule?.TargetMarginPercent);
+        return ToDto(calc, item, channel, rule);
     }
 
     public async Task<List<CalculatedPriceDto>> RecalculateAllAsync(int createdBy)
     {
         _user.Require(Roles.Requester);
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = BusinessClock.Today;
+
+        // Load everything once, calculate in memory, save once.
         var items = await _db.Items.Where(i => i.IsActive).ToListAsync();
         var channels = await _db.Channels.ToListAsync();
-        var results = new List<CalculatedPriceDto>();
+        var rules = await ActiveRulesAsync();
 
+        // Latest valid supplier cost per item
+        var costs = await _db.SupplierPriceLists
+            .Where(s => s.ValidFrom <= today && (s.ValidTo == null || s.ValidTo >= today))
+            .GroupBy(s => s.ItemID)
+            .Select(g => g.OrderByDescending(s => s.ValidFrom).ThenByDescending(s => s.SupplierPriceID)
+                .Select(s => new { s.ItemID, Cost = s.BasePrice + s.ExtraCharges }).First())
+            .ToDictionaryAsync(x => x.ItemID, x => x.Cost);
+
+        var existing = (await _db.CalculatedSellingPrices.ToListAsync())
+            .GroupBy(c => (c.ItemID, c.ChannelID))
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var calculated = new List<(CalculatedSellingPrice Calc, Item Item, Channel Channel, PricingRule? Rule)>();
         foreach (var item in items)
         {
-            // Get latest supplier price
-            var supplierPrice = await _db.SupplierPriceLists
-                .Where(s => s.ItemID == item.ItemID && s.ValidFrom <= today && (s.ValidTo == null || s.ValidTo >= today))
-                .OrderByDescending(s => s.ValidFrom).FirstOrDefaultAsync();
-            if (supplierPrice is null) continue;
-
+            if (!costs.TryGetValue(item.ItemID, out var cost)) continue;
             foreach (var channel in channels)
             {
-                var dto = await CalculateAsync(new CalculatePriceRequest(item.ItemID, channel.ChannelID, supplierPrice.TotalCost, null, createdBy));
-                if (dto is not null) results.Add(dto);
+                var rule = FindRule(rules, item.CategoryID, channel.ChannelID);
+                var calc = Upsert(existing.GetValueOrDefault((item.ItemID, channel.ChannelID)), item.ItemID, channel.ChannelID, cost, rule);
+                calculated.Add((calc, item, channel, rule));
             }
         }
-        return results;
+
+        await _db.SaveChangesAsync();
+        return calculated.Select(c => ToDto(c.Calc, c.Item, c.Channel, c.Rule)).ToList();
     }
+
+    private Task<List<PricingRule>> ActiveRulesAsync() =>
+        _db.PricingRules.Include(r => r.RoundingRule).Where(r => r.IsActive).ToListAsync();
+
+    // The most specific rule wins: category + channel, then category, then channel, then global.
+    private static PricingRule? FindRule(IEnumerable<PricingRule> rules, int? categoryID, int channelID) =>
+        rules.Where(r => r.IsActive &&
+                (r.CategoryID == null || r.CategoryID == categoryID) &&
+                (r.ChannelID == null || r.ChannelID == channelID))
+            .OrderByDescending(r => r.CategoryID.HasValue).ThenByDescending(r => r.ChannelID.HasValue)
+            .FirstOrDefault();
+
+    /// <summary>Applies the rule to the cost and writes the result into a new or existing (tracked) row.</summary>
+    private CalculatedSellingPrice Upsert(CalculatedSellingPrice? existing, int itemID, int channelID, decimal cost, PricingRule? rule)
+    {
+        decimal suggestedPrice = cost;
+        if (rule is not null)
+        {
+            if (rule.TargetMarginPercent.HasValue)
+                suggestedPrice = PricingCalculator.SuggestPriceFromMargin(cost, rule.TargetMarginPercent.Value);
+            else if (rule.MarkupPercent.HasValue)
+                suggestedPrice = PricingCalculator.SuggestPriceFromMarkup(cost, rule.MarkupPercent.Value);
+
+            if (rule.RoundingRule is not null)
+                suggestedPrice = PricingCalculator.ApplyRounding(suggestedPrice, rule.RoundingRule.Pattern);
+        }
+
+        var gm = PricingCalculator.GrossMargin(suggestedPrice, cost);
+
+        if (existing is null)
+        {
+            existing = new CalculatedSellingPrice { ItemID = itemID, ChannelID = channelID, CreatedBy = _user.UserID };
+            _db.CalculatedSellingPrices.Add(existing);
+        }
+
+        existing.Cost = cost;
+        existing.GrossMarginPercent = gm;
+        existing.MarkupPercent = PricingCalculator.Markup(suggestedPrice, cost);
+        existing.SuggestedPrice = suggestedPrice;
+        existing.ColorIndicator = rule?.TargetMarginPercent.HasValue == true
+            ? PricingCalculator.GetColorIndicator(gm, rule.TargetMarginPercent.Value)
+            : ColorIndicator.Green;
+        existing.RuleID = rule?.RuleID;
+        existing.CreatedAt = DateTime.UtcNow;
+        return existing;
+    }
+
+    private static CalculatedPriceDto ToDto(CalculatedSellingPrice c, Item item, Channel channel, PricingRule? rule) => new(
+        c.CalcPriceID, item.ItemID, item.ERPItemCode, item.ItemName, item.UoM,
+        channel.ChannelID, channel.Name, c.Cost, c.GrossMarginPercent, c.MarkupPercent,
+        c.SuggestedPrice, c.ColorIndicator, rule?.TargetMarginPercent);
 }
 
 // ── Batch Service ─────────────────────────────────────────────────────────────
@@ -300,9 +346,13 @@ public class BatchService : IBatchService
     {
         _user.Require(Roles.Requester);
         var batch = new PriceBatch { BatchName = dto.BatchName, CreatedBy = _user.UserID };
-        _db.PriceBatches.Add(batch);
-        await _db.SaveChangesAsync();
-        await _audit.LogAsync(_user.UserID, "CreateBatch", "PriceBatch", batch.BatchID, null, dto.BatchName);
+        await _db.InTransactionAsync(async () =>
+        {
+            _db.PriceBatches.Add(batch);
+            await _db.SaveChangesAsync();
+            _audit.Log(_user.UserID, "CreateBatch", "PriceBatch", batch.BatchID, null, dto.BatchName);
+            await _db.SaveChangesAsync();
+        });
         return batch.BatchID;
     }
 
@@ -315,7 +365,7 @@ public class BatchService : IBatchService
         if (await _db.PriceBatchLines.AnyAsync(l => l.BatchID == dto.BatchID && l.ItemID == dto.ItemID && l.ChannelID == dto.ChannelID))
             throw new InvalidOperationException("Το είδος υπάρχει ήδη για αυτό το κανάλι / This item is already in the batch for this channel.");
 
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = BusinessClock.Today;
         // Get old price from history
         var oldPrice = await _db.PriceChangeHistories
             .Where(h => h.ItemID == dto.ItemID && h.ChannelID == dto.ChannelID)
@@ -335,6 +385,7 @@ public class BatchService : IBatchService
             line.MarginPercent = PricingCalculator.GrossMargin(dto.NewPrice, cost.Value);
 
         _db.PriceBatchLines.Add(line);
+        _audit.Log(_user.UserID, "AddLine", "PriceBatch", dto.BatchID, null, $"Item={dto.ItemID} Ch={dto.ChannelID} {dto.NewPrice}");
         await _db.SaveChangesAsync();
     }
 
@@ -345,6 +396,7 @@ public class BatchService : IBatchService
         if (line is null) return;
         await GetEditableBatchAsync(line.BatchID);
         _db.PriceBatchLines.Remove(line);
+        _audit.Log(_user.UserID, "RemoveLine", "PriceBatch", line.BatchID, $"Item={line.ItemID} Ch={line.ChannelID} {line.NewPrice}");
         await _db.SaveChangesAsync();
     }
 
@@ -364,8 +416,8 @@ public class BatchService : IBatchService
         batch.SubmittedAt = DateTime.UtcNow;
         batch.ApprovedBy = null;
         batch.ApprovedAt = null;
+        _audit.Log(_user.UserID, "SubmitBatch", "PriceBatch", batchID);
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(_user.UserID, "SubmitBatch", "PriceBatch", batchID);
     }
 
     public async Task ApproveBatchAsync(int batchID, int approverID)
@@ -397,8 +449,8 @@ public class BatchService : IBatchService
             });
         }
 
+        _audit.Log(_user.UserID, "ApproveBatch", "PriceBatch", batchID);
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(_user.UserID, "ApproveBatch", "PriceBatch", batchID);
     }
 
     public async Task RejectBatchAsync(int batchID, int approverID)
@@ -409,8 +461,8 @@ public class BatchService : IBatchService
             throw new InvalidOperationException("Μόνο υποβεβλημένα batches απορρίπτονται / Only submitted batches can be rejected.");
 
         batch.Status = BatchStatus.Rejected;
+        _audit.Log(_user.UserID, "RejectBatch", "PriceBatch", batchID);
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(_user.UserID, "RejectBatch", "PriceBatch", batchID);
     }
 
     public async Task ApproveLinesAsync(List<ApproveBatchLineDto> lines)
@@ -421,7 +473,7 @@ public class BatchService : IBatchService
         {
             line.LineStatus = LineStatus.Approved;
             line.ApproverComment = comments[line.LineID];
-            await _audit.LogAsync(_user.UserID, "ApproveLine", "PriceBatchLine", line.LineID, null, line.NewPrice.ToString());
+            _audit.Log(_user.UserID, "ApproveLine", "PriceBatchLine", line.LineID, null, line.NewPrice.ToString());
         }
         await _db.SaveChangesAsync();
     }
@@ -434,7 +486,7 @@ public class BatchService : IBatchService
         {
             line.LineStatus = LineStatus.Rejected;
             line.ApproverComment = comments[line.LineID];
-            await _audit.LogAsync(_user.UserID, "RejectLine", "PriceBatchLine", line.LineID, null, line.NewPrice.ToString());
+            _audit.Log(_user.UserID, "RejectLine", "PriceBatchLine", line.LineID, null, line.NewPrice.ToString());
         }
         await _db.SaveChangesAsync();
     }
@@ -475,11 +527,15 @@ public class PricingRuleService : IPricingRuleService
         {
             CategoryID = dto.CategoryID, ChannelID = dto.ChannelID,
             TargetMarginPercent = dto.TargetMarginPercent, MarkupPercent = dto.MarkupPercent,
-            RoundingRuleID = dto.RoundingRuleID, CreatedBy = dto.CreatedBy
+            RoundingRuleID = dto.RoundingRuleID, CreatedBy = _user.UserID
         };
-        _db.PricingRules.Add(rule);
-        await _db.SaveChangesAsync();
-        await _audit.LogAsync(_user.UserID, "Create", "PricingRule", rule.RuleID, null, Describe(rule));
+        await _db.InTransactionAsync(async () =>
+        {
+            _db.PricingRules.Add(rule);
+            await _db.SaveChangesAsync();
+            _audit.Log(_user.UserID, "Create", "PricingRule", rule.RuleID, null, Describe(rule));
+            await _db.SaveChangesAsync();
+        });
         return rule.RuleID;
     }
 
@@ -491,8 +547,8 @@ public class PricingRuleService : IPricingRuleService
         rule.CategoryID = dto.CategoryID; rule.ChannelID = dto.ChannelID;
         rule.TargetMarginPercent = dto.TargetMarginPercent; rule.MarkupPercent = dto.MarkupPercent;
         rule.RoundingRuleID = dto.RoundingRuleID;
+        _audit.Log(_user.UserID, "Update", "PricingRule", ruleID, before, Describe(rule));
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(_user.UserID, "Update", "PricingRule", ruleID, before, Describe(rule));
     }
 
     public async Task DeleteAsync(int ruleID)
@@ -501,8 +557,8 @@ public class PricingRuleService : IPricingRuleService
         var rule = await _db.PricingRules.FindAsync(ruleID);
         if (rule is null) return;
         _db.PricingRules.Remove(rule);
+        _audit.Log(_user.UserID, "Delete", "PricingRule", ruleID, Describe(rule));
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(_user.UserID, "Delete", "PricingRule", ruleID, Describe(rule));
     }
 
     private static string Describe(PricingRule r) =>
@@ -518,92 +574,179 @@ public class ErpIntegrationService : IErpIntegrationService
     private readonly ICurrentUser _user;
     public ErpIntegrationService(SmartPricingDbContext db, IAuditService audit, ICurrentUser user) { _db = db; _audit = audit; _user = user; }
 
+    // Imports validate every row, report skipped rows instead of silently dropping them,
+    // load lookups once and save everything (including the sync log) in one SaveChanges.
+
     public async Task<SyncResultDto> ImportItemsAsync(List<ErpItemDto> items)
     {
-        _user.Require(Roles.Admin);
+        _user.Require(Roles.Erp);
+        var errors = new List<string>();
+        var codes = items.Select(i => i.ErpItemCode).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().ToList();
+        var existing = await _db.Items.Where(i => codes.Contains(i.ERPItemCode)).ToDictionaryAsync(i => i.ERPItemCode);
+        var categories = (await _db.Categories.ToListAsync())
+            .GroupBy(c => c.Code).ToDictionary(g => g.Key, g => g.First());
+        var seen = new HashSet<string>();
         int count = 0;
-        foreach (var dto in items)
+
+        for (var row = 0; row < items.Count; row++)
         {
-            var existing = await _db.Items.FirstOrDefaultAsync(i => i.ERPItemCode == dto.ErpItemCode);
-            if (existing is null)
+            var dto = items[row];
+            if (string.IsNullOrWhiteSpace(dto.ErpItemCode) || string.IsNullOrWhiteSpace(dto.Name))
+            { errors.Add($"row {row + 1}: code and name are required"); continue; }
+            if (!seen.Add(dto.ErpItemCode))
+            { errors.Add($"{dto.ErpItemCode}: duplicate in payload"); continue; }
+
+            Category? category = null;
+            if (!string.IsNullOrWhiteSpace(dto.CategoryCode) && !categories.TryGetValue(dto.CategoryCode, out category))
             {
-                // Resolve category
-                int? catID = null;
-                if (dto.CategoryCode is not null)
-                {
-                    var cat = await _db.Categories.FirstOrDefaultAsync(c => c.Code == dto.CategoryCode);
-                    if (cat is null) { cat = new Category { Code = dto.CategoryCode, Name = dto.CategoryCode }; _db.Categories.Add(cat); await _db.SaveChangesAsync(); }
-                    catID = cat.CategoryID;
-                }
-                _db.Items.Add(new Item { ERPItemCode = dto.ErpItemCode, ItemName = dto.Name, CategoryID = catID, UoM = dto.Uom, IsActive = dto.IsActive });
+                category = new Category { Code = dto.CategoryCode, Name = dto.CategoryCode };
+                categories[dto.CategoryCode] = category;
+                _db.Categories.Add(category);
             }
-            else { existing.ItemName = dto.Name; existing.IsActive = dto.IsActive; }
+
+            if (!existing.TryGetValue(dto.ErpItemCode, out var item))
+            {
+                item = new Item { ERPItemCode = dto.ErpItemCode };
+                _db.Items.Add(item);
+            }
+            item.ItemName = dto.Name;
+            item.UoM = dto.Uom ?? item.UoM;
+            item.Category = category;
+            if (category is null) item.CategoryID = null;
+            item.IsActive = dto.IsActive;
             count++;
         }
-        await _db.SaveChangesAsync();
-        await LogSync("ItemsImport", "Items", "Success", $"{count} items processed");
-        return new SyncResultDto(true, $"Imported {count} items", count);
+        return await FinishImportAsync("ItemsImport", "Items", "items", count, errors);
     }
 
     public async Task<SyncResultDto> ImportSuppliersAsync(List<ErpSupplierDto> suppliers)
     {
-        _user.Require(Roles.Admin);
+        _user.Require(Roles.Erp);
+        var errors = new List<string>();
+        var codes = suppliers.Select(s => s.ErpSupplierCode).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().ToList();
+        var existing = await _db.Suppliers.Where(s => codes.Contains(s.ERPSupplierCode)).ToDictionaryAsync(s => s.ERPSupplierCode);
+        var seen = new HashSet<string>();
         int count = 0;
-        foreach (var dto in suppliers)
+
+        for (var row = 0; row < suppliers.Count; row++)
         {
-            var existing = await _db.Suppliers.FirstOrDefaultAsync(s => s.ERPSupplierCode == dto.ErpSupplierCode);
-            if (existing is null) _db.Suppliers.Add(new Supplier { ERPSupplierCode = dto.ErpSupplierCode, SupplierName = dto.Name, IsActive = dto.IsActive });
-            else { existing.SupplierName = dto.Name; existing.IsActive = dto.IsActive; }
+            var dto = suppliers[row];
+            if (string.IsNullOrWhiteSpace(dto.ErpSupplierCode) || string.IsNullOrWhiteSpace(dto.Name))
+            { errors.Add($"row {row + 1}: code and name are required"); continue; }
+            if (!seen.Add(dto.ErpSupplierCode))
+            { errors.Add($"{dto.ErpSupplierCode}: duplicate in payload"); continue; }
+
+            if (!existing.TryGetValue(dto.ErpSupplierCode, out var supplier))
+            {
+                supplier = new Supplier { ERPSupplierCode = dto.ErpSupplierCode };
+                _db.Suppliers.Add(supplier);
+            }
+            supplier.SupplierName = dto.Name;
+            supplier.IsActive = dto.IsActive;
             count++;
         }
-        await _db.SaveChangesAsync();
-        await LogSync("SuppliersImport", "Suppliers", "Success", $"{count} suppliers processed");
-        return new SyncResultDto(true, $"Imported {count} suppliers", count);
+        return await FinishImportAsync("SuppliersImport", "Suppliers", "suppliers", count, errors);
     }
 
     public async Task<SyncResultDto> ImportPurchasePricesAsync(List<ErpPurchasePriceDto> prices)
     {
-        _user.Require(Roles.Admin);
-        int count = 0;
-        foreach (var dto in prices)
-        {
-            var supplier = await _db.Suppliers.FirstOrDefaultAsync(s => s.ERPSupplierCode == dto.ErpSupplierCode);
-            var item = await _db.Items.FirstOrDefaultAsync(i => i.ERPItemCode == dto.ErpItemCode);
-            if (supplier is null || item is null) continue;
+        _user.Require(Roles.Erp);
+        var errors = new List<string>();
+        var supplierCodes = prices.Select(p => p.ErpSupplierCode).Distinct().ToList();
+        var itemCodes = prices.Select(p => p.ErpItemCode).Distinct().ToList();
+        var suppliers = await _db.Suppliers.Where(s => supplierCodes.Contains(s.ERPSupplierCode)).ToDictionaryAsync(s => s.ERPSupplierCode);
+        var items = await _db.Items.Where(i => itemCodes.Contains(i.ERPItemCode)).ToDictionaryAsync(i => i.ERPItemCode);
 
-            _db.SupplierPriceLists.Add(new SupplierPriceList
+        // A price for the same supplier, item and start date is updated, not duplicated.
+        var itemIDs = items.Values.Select(i => i.ItemID).ToList();
+        var existing = (await _db.SupplierPriceLists.Where(s => itemIDs.Contains(s.ItemID)).ToListAsync())
+            .GroupBy(s => (s.SupplierID, s.ItemID, s.ValidFrom))
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.SupplierPriceID).First());
+        int count = 0;
+
+        for (var row = 0; row < prices.Count; row++)
+        {
+            var dto = prices[row];
+            var label = $"row {row + 1} ({dto.ErpSupplierCode}/{dto.ErpItemCode})";
+            if (string.IsNullOrWhiteSpace(dto.ErpSupplierCode) || string.IsNullOrWhiteSpace(dto.ErpItemCode))
+            { errors.Add($"row {row + 1}: supplier and item codes are required"); continue; }
+            if (!suppliers.TryGetValue(dto.ErpSupplierCode, out var supplier))
+            { errors.Add($"{label}: unknown supplier"); continue; }
+            if (!items.TryGetValue(dto.ErpItemCode, out var item))
+            { errors.Add($"{label}: unknown item"); continue; }
+            if (dto.BasePrice <= 0 || dto.ExtraCharges < 0)
+            { errors.Add($"{label}: base price must be > 0 and extra charges >= 0"); continue; }
+            if (dto.ValidFrom == default || dto.ValidTo < dto.ValidFrom)
+            { errors.Add($"{label}: invalid validity dates"); continue; }
+
+            var key = (supplier.SupplierID, item.ItemID, dto.ValidFrom);
+            if (!existing.TryGetValue(key, out var price))
             {
-                SupplierID = supplier.SupplierID, ItemID = item.ItemID,
-                BasePrice = dto.BasePrice, ExtraCharges = dto.ExtraCharges,
-                Currency = dto.Currency, ValidFrom = dto.ValidFrom, ValidTo = dto.ValidTo
-            });
+                price = new SupplierPriceList { SupplierID = supplier.SupplierID, ItemID = item.ItemID, ValidFrom = dto.ValidFrom };
+                existing[key] = price;
+                _db.SupplierPriceLists.Add(price);
+            }
+            price.BasePrice = dto.BasePrice;
+            price.ExtraCharges = dto.ExtraCharges;
+            price.Currency = dto.Currency;
+            price.ValidTo = dto.ValidTo;
             count++;
         }
-        await _db.SaveChangesAsync();
-        await LogSync("PurchasePricesImport", "SupplierPriceList", "Success", $"{count} prices processed");
-        return new SyncResultDto(true, $"Imported {count} purchase prices", count);
+        return await FinishImportAsync("PurchasePricesImport", "SupplierPriceList", "purchase prices", count, errors);
     }
 
-    public async Task<List<ErpSellingPriceExportDto>> ExportApprovedSellingPricesAsync()
+    public async Task<List<ErpSellingPriceExportDto>> ExportApprovedSellingPricesAsync(bool includeExported = false)
     {
-        _user.Require(Roles.Admin);
-        var lines = await _db.PriceBatchLines
-            .Include(l => l.Item).Include(l => l.Channel).Include(l => l.Batch)
-            .Where(l => l.LineStatus == LineStatus.Approved && l.Batch!.Status == BatchStatus.Approved)
+        _user.Require(Roles.Erp);
+        var approved = _db.PriceBatchLines
+            .Where(l => l.LineStatus == LineStatus.Approved && l.Batch!.Status == BatchStatus.Approved);
+
+        if (!includeExported)
+        {
+            var pendingItemIDs = await approved.Where(l => l.ExportedAt == null).Select(l => l.ItemID).Distinct().ToListAsync();
+            approved = approved.Where(l => pendingItemIDs.Contains(l.ItemID));
+        }
+
+        var lines = await approved
+            .Select(l => new { Line = l, l.Batch!.ApprovedAt, l.Item!.ERPItemCode, ChannelCode = l.Channel!.Code })
             .ToListAsync();
 
-        return lines.Select(l => new ErpSellingPriceExportDto(
-            l.Item!.ERPItemCode, l.Channel!.Code, l.NewPrice,
-            DateOnly.FromDateTime(l.Batch!.ApprovedAt ?? DateTime.Today), l.BatchID)).ToList();
+        // Only the latest approved price per item/channel is sent, so an older approval
+        // can never overwrite a newer one in the ERP.
+        var latest = lines
+            .GroupBy(x => (x.Line.ItemID, x.Line.ChannelID))
+            .Where(g => includeExported || g.Any(x => x.Line.ExportedAt == null))
+            .Select(g => g.OrderByDescending(x => x.ApprovedAt).ThenByDescending(x => x.Line.LineID).First())
+            .ToList();
+
+        var now = DateTime.UtcNow;
+        foreach (var x in lines.Where(x => x.Line.ExportedAt == null)) x.Line.ExportedAt = now;
+
+        _db.ERPSyncLogs.Add(new ERPSyncLog
+        {
+            SyncType = "SellingPricesExport", Entity = "PriceBatchLines", Status = "Success",
+            Message = $"{latest.Count} prices exported" + (includeExported ? " (full re-export)" : "")
+        });
+        await _db.SaveChangesAsync();
+
+        return latest.Select(x => new ErpSellingPriceExportDto(
+            x.ERPItemCode, x.ChannelCode, x.Line.NewPrice,
+            BusinessClock.ToBusinessDate(x.ApprovedAt ?? now), x.Line.BatchID)).ToList();
     }
 
     public Task<List<ERPSyncLog>> GetSyncLogsAsync(int count = 50) =>
         _db.ERPSyncLogs.OrderByDescending(l => l.CreatedAt).Take(count).ToListAsync();
 
-    private async Task LogSync(string syncType, string entity, string status, string message)
+    private async Task<SyncResultDto> FinishImportAsync(string syncType, string entity, string noun, int processed, List<string> errors)
     {
+        var status = errors.Count == 0 ? "Success" : processed > 0 ? "Partial" : "Failed";
+        var message = $"{processed} {noun} imported, {errors.Count} skipped";
+        if (errors.Count > 0)
+            message += ": " + string.Join("; ", errors.Take(20)) + (errors.Count > 20 ? $"; … {errors.Count - 20} more" : "");
+
         _db.ERPSyncLogs.Add(new ERPSyncLog { SyncType = syncType, Entity = entity, Status = status, Message = message });
         await _db.SaveChangesAsync();
+        return new SyncResultDto(errors.Count == 0, message, processed);
     }
 }
 
@@ -616,23 +759,26 @@ public class DashboardService : IDashboardService
 
     public async Task<DashboardKpiDto> GetKpisAsync()
     {
-        var today = DateTime.UtcNow.Date;
+        var startOfToday = BusinessClock.StartOfTodayUtc;
         var totalBatches = await _db.PriceBatches.CountAsync();
         var pendingApproval = await _db.PriceBatches.CountAsync(b => b.Status == BatchStatus.Submitted);
-        var approvedToday = await _db.PriceBatches.CountAsync(b => b.Status == BatchStatus.Approved && b.ApprovedAt >= today);
+        var approvedToday = await _db.PriceBatches.CountAsync(b => b.Status == BatchStatus.Approved && b.ApprovedAt >= startOfToday);
 
-        var prices = await _db.CalculatedSellingPrices.Include(c => c.Item).Include(c => c.Channel).Include(c => c.Rule).ToListAsync();
-        var belowTarget = prices.Count(c => c.ColorIndicator == ColorIndicator.Red);
-        var avgMargin = prices.Any() ? Math.Round(prices.Average(c => c.GrossMarginPercent), 2) : 0;
+        // Aggregate in SQL instead of loading every calculated price
+        var belowTarget = await _db.CalculatedSellingPrices.CountAsync(c => c.ColorIndicator == ColorIndicator.Red);
+        var avgMargin = Math.Round(await _db.CalculatedSellingPrices.AverageAsync(c => (decimal?)c.GrossMarginPercent) ?? 0, 2);
 
         var recentBatches = await _db.PriceBatches.Include(b => b.Creator)
             .OrderByDescending(b => b.CreatedAt).Take(5)
             .Select(b => new RecentBatchDto(b.BatchID, b.BatchName, b.Status, b.CreatedAt, b.Creator!.DisplayName))
             .ToListAsync();
 
-        var alerts = prices.Where(c => c.ColorIndicator != ColorIndicator.Green)
-            .Select(c => new MarginAlertDto(c.Item!.ItemName, c.Channel!.Name, c.GrossMarginPercent, c.Rule?.TargetMarginPercent ?? 0, c.ColorIndicator))
-            .OrderBy(a => a.MarginPercent).Take(10).ToList();
+        var alerts = await _db.CalculatedSellingPrices
+            .Where(c => c.ColorIndicator != ColorIndicator.Green)
+            .OrderBy(c => c.GrossMarginPercent).Take(10)
+            .Select(c => new MarginAlertDto(c.Item!.ItemName, c.Channel!.Name, c.GrossMarginPercent,
+                c.Rule != null ? c.Rule.TargetMarginPercent ?? 0 : 0, c.ColorIndicator))
+            .ToListAsync();
 
         return new DashboardKpiDto(totalBatches, pendingApproval, approvedToday, belowTarget, avgMargin, recentBatches, alerts);
     }
@@ -670,15 +816,15 @@ public class UserService : IUserService
                 user.LockoutEnd = DateTime.UtcNow.Add(LockoutDuration);
                 user.FailedLoginCount = 0;
             }
+            _audit.Log(user.UserID, "LoginFailed", "User", user.UserID);
             await _db.SaveChangesAsync();
-            await _audit.LogAsync(user.UserID, "LoginFailed", "User", user.UserID);
             return new AuthResultDto(null, user.LockoutEnd > DateTime.UtcNow, false);
         }
 
         user.FailedLoginCount = 0;
         user.LockoutEnd = null;
+        _audit.Log(user.UserID, "Login", "User", user.UserID);
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(user.UserID, "Login", "User", user.UserID);
         return new AuthResultDto(Map(user), false, user.MustChangePassword);
     }
 
@@ -688,8 +834,8 @@ public class UserService : IUserService
         if (user is null || !user.IsActive || !BCrypt.Net.BCrypt.Verify(currentPassword, user.PasswordHash)) return false;
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
         user.MustChangePassword = false;
+        _audit.Log(userID, "ChangePassword", "User", userID);
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(userID, "ChangePassword", "User", userID);
         return true;
     }
 
@@ -711,10 +857,13 @@ public class UserService : IUserService
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
             MustChangePassword = true
         };
-        _db.Users.Add(user);
-        await _db.SaveChangesAsync();
-        await _audit.LogAsync(_user.UserID, "CreateUser", "User", user.UserID, null, dto.UserName);
-        await UpdateRolesAsync(user.UserID, dto.Roles);
+        await _db.InTransactionAsync(async () =>
+        {
+            _db.Users.Add(user);
+            await _db.SaveChangesAsync();
+            _audit.Log(_user.UserID, "CreateUser", "User", user.UserID, null, dto.UserName);
+            await UpdateRolesAsync(user.UserID, dto.Roles);
+        });
         return user.UserID;
     }
 
@@ -728,8 +877,8 @@ public class UserService : IUserService
             var role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
             if (role is not null) _db.UserRoles.Add(new UserRole { UserID = userID, RoleID = role.RoleID });
         }
+        _audit.Log(_user.UserID, "UpdateRoles", "User", userID, null, string.Join(",", roles));
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(_user.UserID, "UpdateRoles", "User", userID, null, string.Join(",", roles));
     }
 
     public async Task DeactivateAsync(int userID)
@@ -740,8 +889,8 @@ public class UserService : IUserService
         var user = await _db.Users.FindAsync(userID);
         if (user is null) return;
         user.IsActive = false;
+        _audit.Log(_user.UserID, "DeactivateUser", "User", userID);
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(_user.UserID, "DeactivateUser", "User", userID);
     }
 }
 
@@ -752,11 +901,8 @@ public class AuditService : IAuditService
     private readonly SmartPricingDbContext _db;
     public AuditService(SmartPricingDbContext db) => _db = db;
 
-    public async Task LogAsync(int? userID, string action, string entityName, int? entityID, string? oldValue = null, string? newValue = null)
-    {
+    public void Log(int? userID, string action, string entityName, int? entityID, string? oldValue = null, string? newValue = null) =>
         _db.AuditLogs.Add(new AuditLog { UserID = userID, Action = action, EntityName = entityName, EntityID = entityID, OldValue = oldValue, NewValue = newValue });
-        await _db.SaveChangesAsync();
-    }
 
     public async Task<List<AuditLogDto>> GetRecentAsync(int count = 100)
     {

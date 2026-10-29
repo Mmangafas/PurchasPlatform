@@ -25,7 +25,8 @@
             <div style="padding:20px">
                 <MudStack Spacing="3">
                     <MudAlert Severity="Severity.Info" Dense>
-                        Επικολλήστε JSON δεδομένα από το ERP ή χρησιμοποιήστε τα παρακάτω κουμπιά.
+                        Επικολλήστε JSON δεδομένα από το ERP. Το ERP μπορεί επίσης να καλέσει απευθείας το API.
+                        / Paste JSON from the ERP. The ERP can also call the API directly.
                     </MudAlert>
 
                     <!-- Import Items -->
@@ -35,14 +36,10 @@
                                 <div style="font-weight:600">📦 Είδη / Items</div>
                                 <div class="text-muted" style="font-size:.8rem">POST /api/erp/items/import</div>
                             </div>
-                            <MudStack Row Spacing="1">
-                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                                           OnClick="@(() => _importTarget = "items")">JSON</MudButton>
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
-                                           OnClick="ImportItems" Disabled="_syncing">
-                                    Import
-                                </MudButton>
-                            </MudStack>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                       OnClick="@(() => _importTarget = "items")" Disabled="_syncing">
+                                Import JSON
+                            </MudButton>
                         </MudStack>
                     </div>
 
@@ -53,14 +50,10 @@
                                 <div style="font-weight:600">🏭 Προμηθευτές / Suppliers</div>
                                 <div class="text-muted" style="font-size:.8rem">POST /api/erp/suppliers/import</div>
                             </div>
-                            <MudStack Row Spacing="1">
-                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                                           OnClick="@(() => _importTarget = "suppliers")">JSON</MudButton>
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
-                                           OnClick="ImportSuppliers" Disabled="_syncing">
-                                    Import
-                                </MudButton>
-                            </MudStack>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                       OnClick="@(() => _importTarget = "suppliers")" Disabled="_syncing">
+                                Import JSON
+                            </MudButton>
                         </MudStack>
                     </div>
 
@@ -71,14 +64,10 @@
                                 <div style="font-weight:600">💶 Τιμές Αγοράς / Purchase Prices</div>
                                 <div class="text-muted" style="font-size:.8rem">POST /api/erp/purchase-prices/import</div>
                             </div>
-                            <MudStack Row Spacing="1">
-                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                                           OnClick="@(() => _importTarget = "prices")">JSON</MudButton>
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
-                                           OnClick="ImportPrices" Disabled="_syncing">
-                                    Import
-                                </MudButton>
-                            </MudStack>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                       OnClick="@(() => _importTarget = "prices")" Disabled="_syncing">
+                                Import JSON
+                            </MudButton>
                         </MudStack>
                     </div>
 
@@ -118,6 +107,8 @@
                                 Export
                             </MudButton>
                         </MudStack>
+                        <MudCheckBox @bind-Value="_includeExported" Size="Size.Small" Dense Class="mt-2"
+                                     Label="Επανεξαγωγή όλων / Re-send all current prices (not only new)" />
                     </div>
 
                     @if (_exportResult is not null)
@@ -156,13 +147,13 @@
                     <MudTd>@context.Entity</MudTd>
                     <MudTd>
                         <MudChip T="string" Size="Size.Small"
-                                 Color="@(context.Status == "Success" ? Color.Success : Color.Error)">
+                                 Color="@(context.Status switch { "Success" => Color.Success, "Partial" => Color.Warning, _ => Color.Error })">
                             @context.Status
                         </MudChip>
                     </MudTd>
                     <MudTd Class="text-muted" Style="font-size:.8rem">@context.Message</MudTd>
                     <MudTd Class="text-mono" Style="font-size:.8rem">
-                        @context.CreatedAt.ToString("dd/MM/yyyy HH:mm:ss")
+                        @context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")
                     </MudTd>
                 </RowTemplate>
                 <NoRecordsContent>
@@ -180,6 +171,7 @@
     private string? _importTarget;
     private string _jsonInput = "";
     private bool _syncing;
+    private bool _includeExported;
     private bool _logsLoading = true;
 
     protected override async Task OnInitializedAsync() => await LoadLogs();
@@ -189,34 +181,6 @@
         _logsLoading = true;
         _logs = await ErpSvc.GetSyncLogsAsync(50);
         _logsLoading = false;
-    }
-
-    private async Task ImportItems()
-    {
-        _syncing = true;
-        // Demo: import empty list to trigger the log
-        var result = await ErpSvc.ImportItemsAsync([]);
-        Snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
-        await LoadLogs();
-        _syncing = false;
-    }
-
-    private async Task ImportSuppliers()
-    {
-        _syncing = true;
-        var result = await ErpSvc.ImportSuppliersAsync([]);
-        Snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
-        await LoadLogs();
-        _syncing = false;
-    }
-
-    private async Task ImportPrices()
-    {
-        _syncing = true;
-        var result = await ErpSvc.ImportPurchasePricesAsync([]);
-        Snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
-        await LoadLogs();
-        _syncing = false;
     }
 
     private async Task ProcessJsonImport()
@@ -244,12 +208,12 @@
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
                 result = await ErpSvc.ImportPurchasePricesAsync(prices);
             }
-            Snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
+            Snackbar.Add(result.Message, result.Success ? Severity.Success : result.RecordsProcessed > 0 ? Severity.Warning : Severity.Error);
             _jsonInput = "";
             _importTarget = null;
             await LoadLogs();
         }
-        catch (Exception ex)
+        catch (JsonException ex)
         {
             Snackbar.Add($"JSON error: {ex.Message}", Severity.Error);
         }
@@ -259,7 +223,7 @@
     private async Task ExportPrices()
     {
         _syncing = true;
-        _exportResult = await ErpSvc.ExportApprovedSellingPricesAsync();
+        _exportResult = await ErpSvc.ExportApprovedSellingPricesAsync(_includeExported);
         _exportJson = JsonSerializer.Serialize(new { prices = _exportResult },
             new JsonSerializerOptions { WriteIndented = true });
         Snackbar.Add($"Εξήχθησαν {_exportResult.Count} τιμές.", Severity.Success);

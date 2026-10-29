@@ -1,3 +1,4 @@
+using System.Globalization;
 using SmartPricing.Domain.Enums;
 
 namespace SmartPricing.Application.Helpers;
@@ -31,20 +32,24 @@ public static class PricingCalculator
         return Math.Round(cost * (1 + markupPercent / 100), 4);
     }
 
-    /// <summary>Apply rounding rule pattern (.99, .50, .05, etc.) to a price</summary>
+    /// <summary>
+    /// Apply rounding rule pattern (.99, .50, .05, etc.) to a price. Always rounds UP, so the
+    /// rounded price never falls below the margin the rule targeted.
+    /// Small patterns that divide 1 evenly (.05, .10, .25) are steps: 12.37 → 12.40 for ".05".
+    /// Other patterns are price endings: 12.37 → 12.50 for ".50", 12.37 → 12.99 for ".99".
+    /// </summary>
     public static decimal ApplyRounding(decimal price, string pattern)
     {
-        var floor = Math.Floor(price);
-        var suffix = pattern.TrimStart('0');  // ".99" → ".99", ".50" → ".50"
+        // Invariant culture: the server may run with a culture that uses ',' as decimal separator (e.g. el-GR).
+        if (!decimal.TryParse(pattern, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value) ||
+            value <= 0 || value >= 1)
+            return Math.Ceiling(price * 100) / 100;   // Unknown pattern: whole cents
 
-        if (decimal.TryParse(suffix, out var dec))
-        {
-            var candidate = floor + dec;
-            return candidate > price ? candidate - 1 : candidate;
-        }
+        if (value < 0.5m && 1 % value == 0)
+            return Math.Ceiling(price / value) * value;
 
-        // Fallback: round to nearest .05
-        return Math.Round(price * 20, MidpointRounding.AwayFromZero) / 20;
+        var candidate = Math.Floor(price) + value;
+        return candidate >= price ? candidate : candidate + 1;
     }
 
     /// <summary>Determine color indicator relative to target margin</summary>

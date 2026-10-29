@@ -317,6 +317,9 @@ namespace SmartPricing.Infrastructure.Migrations
                     b.Property<int>("CreatedBy")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("ExportedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<int>("ItemID")
                         .HasColumnType("int");
 
@@ -507,7 +510,7 @@ namespace SmartPricing.Infrastructure.Migrations
                         new
                         {
                             RoundingRuleID = 1,
-                            Description = "Round to X.99",
+                            Description = "Round up to X.99",
                             IsActive = true,
                             Pattern = ".99",
                             RuleName = "Cents .99"
@@ -515,7 +518,7 @@ namespace SmartPricing.Infrastructure.Migrations
                         new
                         {
                             RoundingRuleID = 2,
-                            Description = "Round to X.50",
+                            Description = "Round up to X.50",
                             IsActive = true,
                             Pattern = ".50",
                             RuleName = "Cents .50"
@@ -523,10 +526,10 @@ namespace SmartPricing.Infrastructure.Migrations
                         new
                         {
                             RoundingRuleID = 3,
-                            Description = "Round to nearest .05",
+                            Description = "Round up to the next .05",
                             IsActive = true,
                             Pattern = ".05",
-                            RuleName = "Nearest .05"
+                            RuleName = "Next .05"
                         });
                 });
 

@@ -52,7 +52,7 @@
         </HeaderContent>
         <RowTemplate>
             <MudTd Class="text-mono" Style="font-size:.78rem;white-space:nowrap">
-                @context.Timestamp.ToString("dd/MM/yy HH:mm:ss")
+                @context.Timestamp.ToLocalTime().ToString("dd/MM/yy HH:mm:ss")
             </MudTd>
             <MudTd>
                 <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Person">

@@ -13,12 +13,14 @@ namespace SmartPricing.Web.Services;
 public class AppStateService : ICurrentUser, IDisposable
 {
     private readonly AuthenticationStateProvider _authProvider;
+    private readonly IHttpContextAccessor _httpContext;
     private ClaimsPrincipal? _principal;
     private UserDto? _user;
 
-    public AppStateService(AuthenticationStateProvider authProvider)
+    public AppStateService(AuthenticationStateProvider authProvider, IHttpContextAccessor httpContext)
     {
         _authProvider = authProvider;
+        _httpContext = httpContext;
         _authProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
     }
 
@@ -64,7 +66,8 @@ public class AppStateService : ICurrentUser, IDisposable
         }
         catch (InvalidOperationException)
         {
-            // No authentication state in this scope (e.g. a minimal API endpoint).
+            // No Blazor authentication state in this scope (a minimal API endpoint): use the request's user.
+            _principal = _httpContext.HttpContext?.User;
         }
         return _principal;
     }
@@ -79,7 +82,8 @@ public class AppStateService : ICurrentUser, IDisposable
 
     private static UserDto? FromClaims(ClaimsPrincipal p)
     {
-        if (!int.TryParse(p.FindFirstValue(ClaimTypes.NameIdentifier), out var id)) return null;
+        // Service identities (the ERP API key) have no user row; they get UserID 0.
+        if (!int.TryParse(p.FindFirstValue(ClaimTypes.NameIdentifier), out var id)) id = 0;
         var name = p.FindFirstValue(ClaimTypes.Name) ?? "";
         return new UserDto(id, name,
             p.FindFirstValue("DisplayName") ?? name,

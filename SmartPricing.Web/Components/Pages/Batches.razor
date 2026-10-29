@@ -72,7 +72,7 @@
                 }
             </MudTd>
             <MudTd>@context.CreatedByName</MudTd>
-            <MudTd Class="text-mono" Style="font-size:.8rem">@context.CreatedAt.ToString("dd/MM/yy HH:mm")</MudTd>
+            <MudTd Class="text-mono" Style="font-size:.8rem">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yy HH:mm")</MudTd>
             <MudTd>
                 <MudStack Row Spacing="1">
                     <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small"

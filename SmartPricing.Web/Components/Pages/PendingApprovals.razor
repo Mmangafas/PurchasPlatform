@@ -65,7 +65,7 @@ else
                     </MudItem>
                     <MudItem xs="12" md="2">
                         <div class="text-muted" style="font-size:.75rem;text-transform:uppercase;font-weight:700">Ημερομηνία</div>
-                        <div class="text-mono">@batch.CreatedAt.ToString("dd/MM/yyyy HH:mm")</div>
+                        <div class="text-mono">@batch.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
                     </MudItem>
                     <MudItem xs="12" md="2">
                         <div class="text-muted" style="font-size:.75rem;text-transform:uppercase;font-weight:700">Γραμμές / Lines</div>

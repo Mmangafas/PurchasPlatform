@@ -168,7 +168,16 @@ The system exposes/consumes these endpoints:
 | `GET` | `/api/erp/selling-prices/export` | SmartPricing → ERP |
 | `GET` | `/api/erp/sync-logs` | Monitoring |
 
-All requests authenticated via: `Authorization: Bearer {token}` + `X-Client: ERP`
+All requests are authenticated with `Authorization: Bearer {Erp:ApiKey}`. Set the key (at least 32 characters) outside `appsettings.json`, for example:
+
+```bash
+dotnet user-secrets set "Erp:ApiKey" "<long random key>" --project SmartPricing.Web
+```
+
+or the `Erp__ApiKey` environment variable on the server. While no key is set, the API rejects every call.
+
+- **Imports** validate every row. Invalid rows, unknown suppliers or items, and duplicates in the payload are skipped and listed in the response and the sync log (status `Partial` or `Failed`). Re-importing a purchase price with the same supplier, item and `validFrom` updates it instead of adding a duplicate.
+- **Export** returns only the latest approved price per item/channel that has not been exported yet, and marks it as exported. Add `?includeExported=true` to re-send all current prices.
 
 ---
 

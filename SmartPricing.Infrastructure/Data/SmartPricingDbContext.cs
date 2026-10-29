@@ -139,9 +139,9 @@ public class SmartPricingDbContext : DbContext
         );
 
         modelBuilder.Entity<RoundingRule>().HasData(
-            new RoundingRule { RoundingRuleID = 1, RuleName = "Cents .99", Pattern = ".99", Description = "Round to X.99", IsActive = true },
-            new RoundingRule { RoundingRuleID = 2, RuleName = "Cents .50", Pattern = ".50", Description = "Round to X.50", IsActive = true },
-            new RoundingRule { RoundingRuleID = 3, RuleName = "Nearest .05", Pattern = ".05", Description = "Round to nearest .05", IsActive = true }
+            new RoundingRule { RoundingRuleID = 1, RuleName = "Cents .99", Pattern = ".99", Description = "Round up to X.99", IsActive = true },
+            new RoundingRule { RoundingRuleID = 2, RuleName = "Cents .50", Pattern = ".50", Description = "Round up to X.50", IsActive = true },
+            new RoundingRule { RoundingRuleID = 3, RuleName = "Next .05", Pattern = ".05", Description = "Round up to the next .05", IsActive = true }
         );
 
         // ── Default Admin user (password: Admin@123) ──────────────────────────

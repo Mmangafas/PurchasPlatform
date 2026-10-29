@@ -27,7 +27,7 @@ else if (_batch is not null)
                     <StatusBadge Status="@_batch.Status" />
                 </MudStack>
                 <div class="text-muted">
-                    Δημιουργήθηκε: @_batch.CreatedAt.ToString("dd/MM/yyyy HH:mm") από @_batch.CreatedByName
+                    Δημιουργήθηκε: @_batch.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm") από @_batch.CreatedByName
                 </div>
             </div>
             <MudStack Row Spacing="2">
@@ -158,14 +158,14 @@ else if (_batch is not null)
                     {
                         <MudListItem Icon="@Icons.Material.Filled.Send">
                             <MudText Typo="Typo.caption" Class="text-muted">Υποβλήθηκε από</MudText>
-                            <div>@_batch.SubmittedByName — @_batch.SubmittedAt?.ToString("dd/MM/yyyy HH:mm")</div>
+                            <div>@_batch.SubmittedByName — @_batch.SubmittedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
                         </MudListItem>
                     }
                     @if (_batch.ApprovedByName is not null)
                     {
                         <MudListItem Icon="@Icons.Material.Filled.CheckCircle">
                             <MudText Typo="Typo.caption" Class="text-muted">Εγκρίθηκε από</MudText>
-                            <div>@_batch.ApprovedByName — @_batch.ApprovedAt?.ToString("dd/MM/yyyy HH:mm")</div>
+                            <div>@_batch.ApprovedByName — @_batch.ApprovedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
                         </MudListItem>
                     }
                     <MudDivider />

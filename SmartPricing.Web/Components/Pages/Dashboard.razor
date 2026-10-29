@@ -87,7 +87,7 @@ else if (_kpi is not null)
                         </MudTd>
                         <MudTd><StatusBadge Status="@context.Status" /></MudTd>
                         <MudTd>@context.CreatedByName</MudTd>
-                        <MudTd Class="text-muted text-mono">@context.CreatedAt.ToString("dd/MM/yyyy HH:mm")</MudTd>
+                        <MudTd Class="text-muted text-mono">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
                     </RowTemplate>
                     <NoRecordsContent>
                         <MudText Class="pa-4 text-muted">Δεν υπάρχουν batches ακόμα.</MudText>

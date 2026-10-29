@@ -1,0 +1,27 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "SmartPricing",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "$env:ASPNETCORE_ENVIRONMENT='Development'; dotnet run --project SmartPricing.Web --no-launch-profile --urls https://localhost:7451"
+      ],
+      "port": 7451,
+      "url": "https://localhost:7451"
+    },
+    {
+      "name": "SmartPricing (LocalDB test)",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "$env:ConnectionStrings__Default='Server=(localdb)\\MSSQLLocalDB;Database=SP_Verify_Fresh;Trusted_Connection=True;TrustServerCertificate=True'; $env:ConnectionStrings__DefaultPassword=''; $env:ASPNETCORE_ENVIRONMENT='Development'; dotnet run --project SmartPricing.Web --no-launch-profile --urls https://localhost:7451"
+      ],
+      "port": 7451,
+      "url": "https://localhost:7451"
+    }
+  ]
+}

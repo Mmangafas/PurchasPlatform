@@ -156,6 +156,7 @@ public class PriceBatchLine
     public string? ApproverComment { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public int CreatedBy { get; set; }
+    public DateTime? ExportedAt { get; set; }   // When the approved price was sent to the ERP
 
     public PriceBatch? Batch { get; set; }
     public Item? Item { get; set; }
